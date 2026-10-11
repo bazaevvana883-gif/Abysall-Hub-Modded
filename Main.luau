@@ -884,14 +884,15 @@ end
 task.wait(0.1)
 
 if not RemotesFolder then
-	if Services.ReplicatedStorage:FindFirstChild("EntityInfo") then
-		RemotesFolder = Services.ReplicatedStorage:FindFirstChild("EntityInfo")
-	elseif Services.ReplicatedStorage:FindFirstChild("Bricks") then
-		RemotesFolder = Services.ReplicatedStorage:FindFirstChild("Bricks")
-	end
+	RemotesFolder = Services.ReplicatedStorage:WaitForChild("RemotesFolder", 3)
+		or Services.ReplicatedStorage:WaitForChild("EntityInfo", 3)
+		or Services.ReplicatedStorage:WaitForChild("Bricks", 3)
+		or Services.ReplicatedStorage:FindFirstChild("RemotesFolder")
+		or Services.ReplicatedStorage:FindFirstChild("EntityInfo")
+		or Services.ReplicatedStorage:FindFirstChild("Bricks")
 end
 
-if Floor == "Hotel" and RemotesFolder.Name == "Bricks" then
+if Floor == "Hotel" and RemotesFolder and RemotesFolder.Name == "Bricks" then
 	Floor = "OldHotel"
 end
 
@@ -915,10 +916,12 @@ FakeEvents.Shade.Name    = "ShadeResult"
 FakeEvents.A90.Name      = "A90"
 FakeEvents.Surge.Name    = "SurgeRemote"
 
-FakeEvents.Screech_Real = RemotesFolder:WaitForChild("Screech")
-FakeEvents.Shade_Real   = RemotesFolder:WaitForChild("ShadeResult")
-FakeEvents.A90_Real     = RemotesFolder:FindFirstChild("A90")
-FakeEvents.Surge_Real   = RemotesFolder:FindFirstChild("SurgeRemote")
+if RemotesFolder then
+	FakeEvents.Screech_Real = RemotesFolder:WaitForChild("Screech", 3) or RemotesFolder:FindFirstChild("Screech")
+	FakeEvents.Shade_Real   = RemotesFolder:WaitForChild("ShadeResult", 3) or RemotesFolder:FindFirstChild("ShadeResult")
+	FakeEvents.A90_Real     = RemotesFolder:FindFirstChild("A90")
+	FakeEvents.Surge_Real   = RemotesFolder:FindFirstChild("SurgeRemote")
+end
 
 if RemotesFolder:FindFirstChild("FootstepRemoteThatWeNeed") then
     local RealRemote = RemotesFolder:FindFirstChild("FootstepRemoteThatWeNeed")
@@ -4717,6 +4720,7 @@ Groupboxes.Exploits_Remove:AddToggle("NoA90Damage",     { Text = "No A-90 Damage
 Groupboxes.Exploits_Remove:AddToggle("NoSurgeDamage",   { Text = "No Surge Damage",   Default = false, Tooltip = "Prevents 'Surge' from hurting you." })
 
 Toggles.NoScreechDamage:OnChanged(function(Value)
+	if not FakeEvents.Screech_Real or not RemotesFolder then return end
 	if Value then
 		FakeEvents.Screech.Parent = RemotesFolder
 		FakeEvents.Screech_Real.Parent = nil
@@ -4726,6 +4730,7 @@ Toggles.NoScreechDamage:OnChanged(function(Value)
 	end
 end)
 Toggles.NoHaltDamage:OnChanged(function(Value)
+	if not FakeEvents.Shade_Real or not RemotesFolder then return end
 	if Value then
 		FakeEvents.Shade.Parent = RemotesFolder
 		FakeEvents.Shade_Real.Parent = nil
@@ -4734,6 +4739,7 @@ Toggles.NoHaltDamage:OnChanged(function(Value)
 		FakeEvents.Shade.Parent = nil
 	end
 end)
+
 Toggles.NoA90Damage:OnChanged(function(Value)
 	if RemotesFolder:FindFirstChild("A90") then
 		if Value then
@@ -4779,7 +4785,9 @@ Toggles.RemoveScreech:OnChanged(function(Value)
 	end
 end)
 Toggles.RemoveHalt:OnChanged(function(Value)
-	Modules.Shade.Name = Value and "Shade_Disabled" or "Shade"
+	if Modules and Modules.Shade then
+		Modules.Shade.Name = Value and "Shade_Disabled" or "Shade"
+	end
 end)
 Toggles.RemoveA90:OnChanged(function(Value)
 	if Modules.A90 then
@@ -4951,10 +4959,14 @@ Groupboxes.Visuals_Effects:AddToggle("DisableFiredampEffect",    { Text = "Disab
 Groupboxes.Visuals_Effects:AddToggle("DisableEntityJumpscares",  { Text = "Disable Entity Jumpscares",  Default = false, Tooltip = "Disables jumpscares from entities like Rush and Ambush." })
 
 Toggles.DisableGlitchJumpscare:OnChanged(function(Value)
-	Modules.Glitch.Name = Value and "Glitch_Disabled" or "Glitch"
+	if Modules and Modules.Glitch then
+		Modules.Glitch.Name = Value and "Glitch_Disabled" or "Glitch"
+	end
 end)
 Toggles.DisableTimothyJumpscare:OnChanged(function(Value)
-	Modules.SpiderJumpscare.Name = Value and "SpiderJumpscare_Disabled" or "SpiderJumpscare"
+	if Modules and Modules.SpiderJumpscare then
+		Modules.SpiderJumpscare.Name = Value and "SpiderJumpscare_Disabled" or "SpiderJumpscare"
+	end
 end)
 Toggles.DisableVoidJumpscare:OnChanged(function(Value)
 	if Modules.Void then Modules.Void.Name = Value and "Void_Disabled" or "Void" end
@@ -6305,18 +6317,20 @@ end
 if Services.ReplicatedStorage:FindFirstChild("ModulesClient") then
 	ClientModules = Services.ReplicatedStorage.ModulesClient
 else
-	ClientModules = Services.ReplicatedStorage.ClientModules
+	ClientModules = Services.ReplicatedStorage:FindFirstChild("ClientModules")
 end
 
+local EntityModules = ClientModules and (ClientModules:FindFirstChild("EntityModules") or ClientModules:FindFirstChild("Entity"))
+
 Modules = {
-	Glitch         = ClientModules.EntityModules.Glitch,
-	Shade          = ClientModules.EntityModules.Shade,
-	Void           = ClientModules.EntityModules:FindFirstChild("Void"),
+	Glitch          = EntityModules and EntityModules:FindFirstChild("Glitch"),
+	Shade           = EntityModules and EntityModules:FindFirstChild("Shade"),
+	Void            = EntityModules and EntityModules:FindFirstChild("Void"),
 	SpiderJumpscare = nil,
-	A90            = nil,
-	Screech        = nil,
-	Dread          = nil,
-	GlitchScreech  = nil,
+	A90             = nil,
+	Screech         = nil,
+	Dread           = nil,
+	GlitchScreech   = nil,
 }
 
 local CharacterOldConnectionKeys = {
@@ -8467,10 +8481,10 @@ Library:OnUnload(function()
 		if Modules[Key] then Modules[Key].Name = OriginalName end
 	end
 
-	FakeEvents.Screech:Destroy()
-	FakeEvents.Screech_Real.Parent = RemotesFolder
-	FakeEvents.Shade:Destroy()
-	FakeEvents.Shade_Real.Parent = RemotesFolder
+	if FakeEvents.Screech then FakeEvents.Screech:Destroy() end
+	if FakeEvents.Screech_Real and RemotesFolder then FakeEvents.Screech_Real.Parent = RemotesFolder end
+	if FakeEvents.Shade then FakeEvents.Shade:Destroy() end
+	if FakeEvents.Shade_Real and RemotesFolder then FakeEvents.Shade_Real.Parent = RemotesFolder end
 
 	if FakeEvents.A90_Real then
 		FakeEvents.A90:Destroy()
