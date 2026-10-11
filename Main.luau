@@ -4664,20 +4664,33 @@ local SpoofMonstersList = {
 	["FrozenAmbush"]   = true,
 }
 
+local lastMonsterCheck = 0
+local cachedMonsterAround = false
+
 local function IsSpoofMonsterAround()
+	local now = tick()
+	if now - lastMonsterCheck < 0.15 then
+		return cachedMonsterAround
+	end
+	lastMonsterCheck = now
+
 	for _, child in ipairs(Services.Workspace:GetChildren()) do
 		if SpoofMonstersList[child.Name] then
+			cachedMonsterAround = true
 			return true
 		end
 	end
-	local liveEntities = Services.Workspace:FindFirstChild("LiveEntities")
-	if liveEntities then
-		for _, child in ipairs(liveEntities:GetChildren()) do
+	local liveEnts = Services.Workspace:FindFirstChild("LiveEntities")
+	if liveEnts then
+		for _, child in ipairs(liveEnts:GetChildren()) do
 			if SpoofMonstersList[child.Name] then
+				cachedMonsterAround = true
 				return true
 			end
 		end
 	end
+
+	cachedMonsterAround = false
 	return false
 end
 
@@ -6817,8 +6830,10 @@ Functions.HandleCharacter = function(NewCharacter)
 			RootPart.CanCollide = false
 		end
 
-		for _, Part in Character:GetChildren() do
-			if Part:IsA("BasePart") then Part.CanCollide = false end
+		for _, Part in ipairs(Character:GetChildren()) do
+			if Part:IsA("BasePart") and Part.CanCollide then
+				Part.CanCollide = false
+			end
 		end
 
 		if LocalPlayer:GetAttribute("Alive") == true then
@@ -7821,8 +7836,9 @@ end
 
 Globals.QueueDone = true
 Connections.QueueConnection = Services.RunService.Heartbeat:Connect(function()
-	for _ = 1, 15 do
-		local Object = table.remove(Globals.ObjectQueue, 1)
+	-- Извлечение с конца таблицы O(1) исключает сдвиг массива и микрофризы
+	for _ = 1, 20 do
+		local Object = table.remove(Globals.ObjectQueue)
 		if not Object then break end
 		if Object.Parent then
 			Functions.HandleObject(Object)
@@ -7834,7 +7850,16 @@ for _, Object in ipairs(Services.Workspace:GetDescendants()) do
 	Functions.QueueObject(Object)
 end
 
+-- Отсеиваем визуальный мусор прямо на входе, не перегружая память
+local IgnoredClasses = {
+	Part = false, Model = false, ProximityPrompt = false,
+	ParticleEmitter = true, Attachment = true, Beam = true,
+	Trail = true, Decal = true, Texture = true, Sound = true,
+	Weld = true, Motor6D = true, WeldConstraint = true, Highlight = true
+}
+
 Connections.InstanceHandler = Services.Workspace.DescendantAdded:Connect(function(Object)
+	if IgnoredClasses[Object.ClassName] then return end
 	Functions.QueueObject(Object)
 end)
 
@@ -8320,14 +8345,11 @@ local function HandleEntitySpawn(Entity)
 end
 
 Connections.EntityHandler = Services.Workspace.ChildAdded:Connect(HandleEntitySpawn)
-Connections.EntityDescendantHandler = Services.Workspace.DescendantAdded:Connect(function(Descendant)
-	local EntityModel = Descendant:IsA("Model") and Descendant or Descendant:FindFirstAncestorOfClass("Model")
-	if EntityModel and Entities[EntityModel.Name] then
-		task.defer(function()
-			HandleEntitySpawn(EntityModel)
-		end)
-	end
-end)
+
+local liveEntities = Services.Workspace:FindFirstChild("LiveEntities")
+if liveEntities then
+	Connections.LiveEntitiesHandler = liveEntities.ChildAdded:Connect(HandleEntitySpawn)
+end
 
 -- Проверка уже заспавненных сущностей при запуске скрипта
 for _, Obj in ipairs(Services.Workspace:GetDescendants()) do
@@ -8338,21 +8360,20 @@ end
 
 local LastClean = tick()
 Connections.Cleaner = Services.RunService.Heartbeat:Connect(function()
-	if tick() - LastClean <= 0.5 then return end
+	if tick() - LastClean <= 1 then return end
 	LastClean = tick()
 
-	for ArrayName, Array in Objects do
+	for _, Array in pairs(Objects) do
 		local I = #Array
 		while I >= 1 do
 			local Object = Array[I]
-			if Object == nil or not Object:IsDescendantOf(Services.Workspace) then
+			-- Object.Parent == nil работает в разы быстрее, чем IsDescendantOf
+			if not Object or Object.Parent == nil then
 				table.remove(Array, I)
 				local Conn = ESPConnections[Object]
 				if Conn then
 					Conn:Disconnect()
 					ESPConnections[Object] = nil
-					local Pos = table.find(Connections, Conn)
-					if Pos then table.remove(Connections, Pos) end
 				end
 			end
 			I -= 1
