@@ -4631,7 +4631,7 @@ Toggles.InfCrucifix:OnChanged(function(Value)
 end)
 
 
-GGroupboxes.Exploits_BypassRight:AddDivider()
+Groupboxes.Exploits_BypassRight:AddDivider()
 Groupboxes.Exploits_BypassRight:AddToggle("PositionSpoof", {
 	Text = "Position Spoof", Default = false,
 	Tooltip = "Makes your character appear underground on the server, protecting you from rush-like entities."
@@ -4853,12 +4853,10 @@ Groupboxes.Visuals_Camera:AddToggle("RemoveCameraFog", { Text = "Remove Fog", De
 Groupboxes.Visuals_Camera:AddDivider()
 Groupboxes.Visuals_Camera:AddToggle("ThirdPersonToggle", { Text = "Third Person", Default = false, Tooltip = "Zooms out your camera, allowing you to see your character from behind." })
 Toggles.ThirdPersonToggle:OnChanged(function(Value)
-	if not Value then
-		for _, Part in ipairs(Globals.ThirdPersonParts) do
-			if Part and Part.Parent then
-				Part.Transparency = 0
-				Part.LocalTransparencyModifier = 0
-			end
+	for _, Part in ipairs(Globals.ThirdPersonParts) do
+		if Part and Part.Parent then
+			Part.Transparency = 0
+			Part.LocalTransparencyModifier = Value and 0 or 1
 		end
 	end
 end)
@@ -6854,85 +6852,6 @@ Functions.HandleCharacter = function(NewCharacter)
 		end
 
 		CollisionClone.CollisionGroup = Collision.CollisionGroup
-		CollisionClone.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and 1.75 or 0.18, 0)
-
-		if HasMonster and not Globals.PositionSpoofActive then
-			Globals.PositionSpoofActive = true
-			if Floor ~= "Fools" and Floor ~= "OldHotel" and RootPart and Humanoid then
-				RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-				Humanoid.HipHeight = 0.05
-				if RemotesFolder:FindFirstChild("Crouch") then
-					RemotesFolder.Crouch:FireServer(true, true)
-				end
-			end
-		elseif not HasMonster and Globals.PositionSpoofActive then
-			Globals.PositionSpoofActive = false
-			if Floor ~= "Fools" and Floor ~= "OldHotel" and RootPart and Humanoid then
-				RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
-				Humanoid.HipHeight = 2.396
-			end
-		end
-
-		local IsSpoofEffective = Toggles.PositionSpoof.Value and Globals.PositionSpoofActive
-
-		if (Toggles.CrouchSpoof.Value or IsSpoofEffective) and RemotesFolder:FindFirstChild("Crouch") then
-			RemotesFolder.Crouch:FireServer(true, true)
-		end
-
-		if Floor ~= "Fools" and Floor ~= "OldHotel" and not Camera:FindFirstChild("MinecartRig") then
-			RootPart.CanCollide = false
-		end
-
-		for _, Part in Character:GetChildren() do
-			if Part:IsA("BasePart") then Part.CanCollide = false end
-		end
-
-		if LocalPlayer:GetAttribute("Alive") == true then
-			Services.SoundService:WaitForChild("Main").Volume = 1
-		end
-
-		if Floor == "OldHotel" or Floor == "Fools" then
-			local SpoofOffset = IsSpoofEffective and Functions.GetNearestEntity() and 200 or Toggles.FigureGodmode.Value and Functions.GetNearestFigure() and 200 or 0
-			Globals.SpoofOffset = SpoofOffset
-			Collision.Position = RootPart.Position + Vector3.new(0, SpoofOffset, 0)
-			Collision.CanCollide = false
-			if Floor == "Fools" then
-				Collision.CollisionCrouch.CanCollide = false
-				CollisionClone.CollisionCrouch.CanCollide = false
-			end
-			RootPart.CanCollide = not (Toggles.NoclipToggle.Value or Toggles.VelocityManipulationToggle.Value)
-		else
-			Collision.CanCollide = false
-			if Collision:FindFirstChild("CollisionCrouch") then Collision.CollisionCrouch.CanCollide = false end
-
-			if CollisionClone:FindFirstChild("CollisionCrouch") then
-				local IsCrouch = Functions.IsCrouching()
-				CollisionClone.CanCollide = not (Toggles.NoclipToggle.Value or Toggles.VelocityManipulationToggle.Value or IsCrouch)
-				CollisionClone.CollisionCrouch.CanCollide = not (Toggles.NoclipToggle.Value or Toggles.VelocityManipulationToggle.Value or not IsCrouch)
-			else
-				RootPart.CanCollide = not (Toggles.NoclipToggle.Value or Toggles.VelocityManipulationToggle.Value)
-			end
-
-			if Character:FindFirstChild("LowerTorso") and Character.LowerTorso:FindFirstChild("Root") then
-				Character.LowerTorso.Root.C1 = Globals.OriginalC1 * CFrame.new(0, IsSpoofEffective and -2.346 or 0, 0)
-			end
-
-			local SpoofY = IsSpoofEffective and 2.328 or 0.18
-			Collision.Position     = RootPart.Position + Vector3.new(0, SpoofY, 0)
-			CollisionPart.Position = RootPart.Position + Vector3.new(0, SpoofY, 0)
-
-			if Collision:FindFirstChild("CollisionCrouch") and CollisionClone:FindFirstChild("CollisionCrouch") then
-				local CrouchY = IsSpoofEffective and 1.328 or -0.982
-				Collision.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, CrouchY, 0)
-				CollisionClone.CollisionCrouch.CollisionGroup = Collision.CollisionCrouch.CollisionGroup
-			end
-			if CollisionClone:FindFirstChild("CollisionCrouch") then
-				CollisionClone.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, IsSpoofEffective and 0.75 or -0.982, 0)
-			end
-		end
-
-		CollisionClone.CollisionGroup = Collision.CollisionGroup
-		CollisionClone.Position = RootPart.Position + Vector3.new(0, IsSpoofEffective and 1.75 or 0.18, 0)
 
 		if Toggles.VelocityManipulationToggle.Value and Options.VelocityManipulationMode.Value == "Velocity" then
 			Globals.ManipulateBody.Parent = RootPart
