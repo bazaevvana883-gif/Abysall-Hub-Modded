@@ -27,47 +27,86 @@ getgenv().Abysall = {
 
 local BaseUrl = "https://raw.githubusercontent.com/therealcookiemonsterof1966/AbysallContinued/main/"
 
+-- Универсальные файловые функции (поддержка PC и всех мобильных эксплойтов: Delta, Codex, Hydrogen, Arceus, Wave и др.)
 local rf = readfile or (getgenv and getgenv().readfile)
 local wf = writefile or (getgenv and getgenv().writefile)
 local ef = isfile or (getgenv and getgenv().isfile)
+local mf = makefolder or (getgenv and getgenv().makefolder)
 
--- Чистый оригинальный HttpGet в обход любых хуков
-local rawHttpGet = clonefunction and clonefunction(game.HttpGet) or game.HttpGet
+if mf then
+    pcall(mf, "Abysall_Cache")
+end
 
--- Чтение из папки workspace эксплойта
 local function ReadLocalFile(name)
-    if not ef or not rf then return nil end
-    local paths = { "Abysall_" .. name, "Abysall/" .. name, name }
+    if not rf then return nil end
+    local cleanName = name:gsub("[^%w%._%-]", "_")
+    local paths = {
+        "Abysall_Cache/" .. cleanName,
+        "Abysall_" .. cleanName,
+        cleanName,
+        "Abysall/" .. cleanName
+    }
     for _, path in ipairs(paths) do
-        if ef(path) then
-            local ok, data = pcall(rf, path)
-            if ok and type(data) == "string" and #data > 50 then
-                return data
-            end
+        local ok, data = pcall(rf, path)
+        if ok and type(data) == "string" and #data > 50 then
+            return data
         end
     end
     return nil
 end
 
--- Сохранение напрямую в workspace эксплойта
 local function SaveLocalFile(name, content)
     if not wf or not content or #content < 50 then return end
-    pcall(wf, "Abysall_" .. name, content)
+    local cleanName = name:gsub("[^%w%._%-]", "_")
+    if mf then pcall(mf, "Abysall_Cache") end
+    local ok = pcall(wf, "Abysall_Cache/" .. cleanName, content)
+    if not ok then
+        pcall(wf, "Abysall_" .. cleanName, content)
+    end
 end
 
--- Получение файла: если уже есть на диске — 0.01 сек, если нет — качаем 1 раз
+-- Чистый оригинальный HttpGet в обход любых хуков
+local rawHttpGet = clonefunction and clonefunction(game.HttpGet) or game.HttpGet
+
+-- Генерация зеркал через сверхбыстрый глобальный CDN jsDelivr (не блокируется и не режется провайдерами)
+local function GetMirrorUrls(url)
+    local urls = {}
+    if type(url) == "string" and url:find("raw.githubusercontent.com") then
+        local user, repo, branch, rest = url:match("raw%.githubusercontent%.com/([^/]+)/([^/]+)/refs/heads/([^/]+)/(.*)")
+        if not user then
+            user, repo, branch, rest = url:match("raw%.githubusercontent%.com/([^/]+)/([^/]+)/([^/]+)/(.*)")
+        end
+        if user and repo and branch and rest then
+            table.insert(urls, "https://cdn.jsdelivr.net/gh/" .. user .. "/" .. repo .. "@" .. branch .. "/" .. rest)
+            table.insert(urls, "https://fastly.jsdelivr.net/gh/" .. user .. "/" .. repo .. "@" .. branch .. "/" .. rest)
+        end
+    end
+    table.insert(urls, url)
+    return urls
+end
+
+local function DownloadRaw(url)
+    local mirrors = GetMirrorUrls(url)
+    for _, mirrorUrl in ipairs(mirrors) do
+        local ok, res = pcall(rawHttpGet, game, mirrorUrl)
+        if ok and type(res) == "string" and #res > 50 then
+            return res
+        end
+    end
+    local ok, res = pcall(function() return game:HttpGet(url) end)
+    if ok and type(res) == "string" and #res > 50 then
+        return res
+    end
+    return nil
+end
+
 local function GetScript(name, url)
     local cached = ReadLocalFile(name)
     if cached then
         return cached
     end
 
-    local content = nil
-    local ok, res = pcall(rawHttpGet, game, url)
-    if ok and type(res) == "string" and #res > 50 then
-        content = res
-    end
-
+    local content = DownloadRaw(url)
     if content then
         SaveLocalFile(name, content)
         return content
@@ -76,7 +115,7 @@ local function GetScript(name, url)
     return ""
 end
 
--- Перехватчик подгрузок для Obsidian UI (внутри Interface.luau) без зацикливания
+-- Хук HttpGet для динамических загрузок (ассеты, картинки, звуки)
 local function CachedHttpGetHook(self, url, ...)
     if type(url) == "string" and url:find("http") then
         local cleanName = url:match("([^/]+)$") or "module.lua"
@@ -90,8 +129,8 @@ local function CachedHttpGetHook(self, url, ...)
             return cached
         end
 
-        local ok, content = pcall(rawHttpGet, self, url, ...)
-        if ok and content and #content > 50 then
+        local content = DownloadRaw(url)
+        if content and #content > 50 then
             SaveLocalFile(cleanName, content)
             return content
         end
@@ -101,35 +140,77 @@ end
 
 if not getgenv().Abysall_HttpHooked then
     getgenv().Abysall_HttpHooked = true
-    if hookfunction then
-        pcall(hookfunction, game.HttpGet, newcclosure(CachedHttpGetHook))
-    end
-    if hookmetamethod then
-        local oldNamecall
-        oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            if (method == "HttpGet" or method == "httpGet") and self == game then
-                local args = { ... }
-                return CachedHttpGetHook(self, args[1], select(2, ...))
-            end
-            return oldNamecall(self, ...)
-        end))
+    pcall(function()
+        if hookmetamethod then
+            local oldNamecall
+            oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+                local method = getnamecallmethod()
+                if (method == "HttpGet" or method == "httpGet") and self == game then
+                    local args = { ... }
+                    return CachedHttpGetHook(self, args[1], select(2, ...))
+                end
+                return oldNamecall(self, ...)
+            end))
+        end
+    end)
+    pcall(function()
+        if hookfunction then
+            hookfunction(game.HttpGet, newcclosure(CachedHttpGetHook))
+        end
+    end)
+end
+
+-- Полный список всех компонентов (включая модули интерфейса, чтобы исключить любые повторные сетевые запросы)
+local Components = {
+    Environment          = { File = "Environment.luau",          Url = BaseUrl .. "Components/Environment.luau" },
+    ESPLibrary           = { File = "ESP.luau",                  Url = BaseUrl .. "Components/ESP.luau" },
+    Notice16             = { File = "16Notice.luau",             Url = BaseUrl .. "Components/16Notice.luau" },
+    Analytics            = { File = "Analytics.luau",            Url = BaseUrl .. "Components/Analytics.luau" },
+    STX                  = { File = "STX.luau",                  Url = "https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Components/STX.luau" },
+    Obsidian_Library     = { File = "Obsidian_Library.lua",      Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua" },
+    Obsidian_SaveManager = { File = "Obsidian_SaveManager.lua",  Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/SaveManager.lua" },
+    Obsidian_ThemeManager= { File = "Obsidian_ThemeManager.lua", Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/ThemeManager.lua" },
+    InfoTab              = { File = "InfoTab.luau",              Url = BaseUrl .. "Components/InfoTab.luau" },
+    SettingsTab          = { File = "SettingsTab.luau",          Url = BaseUrl .. "Components/SettingsTab.luau" },
+}
+
+local LoadedSource = {}
+local missingTasks = {}
+
+for key, info in pairs(Components) do
+    local cached = ReadLocalFile(info.File)
+    if cached then
+        LoadedSource[key] = cached
+    else
+        table.insert(missingTasks, { key = key, file = info.File, url = info.Url })
     end
 end
 
--- Загрузка основных компонентов
-local LoadedSource = {}
-local Components = {
-    Environment = { File = "Environment.luau", Url = BaseUrl .. "Components/Environment.luau" },
-    ESPLibrary  = { File = "ESP.luau", Url = BaseUrl .. "Components/ESP.luau" },
-    Notice16    = { File = "16Notice.luau", Url = BaseUrl .. "Components/16Notice.luau" },
-    Interface   = { File = "Interface.luau", Url = BaseUrl .. "Components/Interface.luau" },
-    Analytics   = { File = "Analytics.luau", Url = BaseUrl .. "Components/Analytics.luau" },
-    STX         = { File = "STX.luau", Url = "https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Components/STX.luau" },
-}
+-- Если каких-то компонентов нет на диске (первый запуск), скачиваем их параллельно через скоростной CDN
+if #missingTasks > 0 then
+    local finished = 0
+    for _, t in ipairs(missingTasks) do
+        task.spawn(function()
+            local content = DownloadRaw(t.url)
+            if content and #content > 50 then
+                LoadedSource[t.key] = content
+                SaveLocalFile(t.file, content)
+            end
+            finished += 1
+        end)
+    end
 
-for key, info in pairs(Components) do
-    LoadedSource[key] = GetScript(info.File, info.Url)
+    local waitStart = tick()
+    while finished < #missingTasks and (tick() - waitStart < 8) do
+        task.wait(0.05)
+    end
+
+    -- Докачиваем синхронно, если какая-то нить не успела
+    for _, t in ipairs(missingTasks) do
+        if not LoadedSource[t.key] or #LoadedSource[t.key] < 50 then
+            LoadedSource[t.key] = GetScript(t.file, t.url)
+        end
+    end
 end
 
 LoadedSource["16Notice"] = LoadedSource.Notice16
@@ -191,8 +272,59 @@ if Abysall.Environment.writefile and Abysall.Environment.readfile then
     )
 end
 
-Abysall.Interface = loadstring(LoadedSource.Interface)()
-Abysall.Analytics = loadstring(LoadedSource.Analytics)()
+local function SafeLoadComponent(key)
+    local src = LoadedSource[key]
+    if not src or #src < 50 then
+        src = GetScript(Components[key].File, Components[key].Url)
+        LoadedSource[key] = src
+    end
+    local fn, err = loadstring(src)
+    if not fn then
+        warn("Failed to load component " .. tostring(key) .. ": " .. tostring(err))
+        return nil
+    end
+    return fn()
+end
+
+Abysall.Interface = {
+    Library = SafeLoadComponent("Obsidian_Library"),
+    SaveManager = SafeLoadComponent("Obsidian_SaveManager"),
+    ThemeManager = SafeLoadComponent("Obsidian_ThemeManager"),
+    ApplyInfoTab = SafeLoadComponent("InfoTab"),
+    ApplySettingsTab = SafeLoadComponent("SettingsTab"),
+}
+
+Abysall.Interface.ThemeManager.BuiltInThemes = {
+	["Rat"] = { 1, { MainColor = "000000", FontFace = "Code", FontColor = "ffffff", OutlineColor = "323232", BackgroundColor = "000000", BackgroundImage = "96328525673956", AccentColor = "3e8846" } },
+	["CookieMonster"] = { 2, { MainColor = "191919", FontFace = "Code", FontColor = "68ba95", OutlineColor = "282828", BackgroundColor = "000000", BackgroundImage = "85834287002942", AccentColor = "bb4d4d" } },
+	["Default"] = { 3, { FontColor = "ffffff", MainColor = "1c1c1c", AccentColor = "0055ff", BackgroundColor = "141414", OutlineColor = "323232" } },
+	["BBot"] = { 4, { FontColor = "ffffff", MainColor = "1e1e1e", AccentColor = "7e48a3", BackgroundColor = "232323", OutlineColor = "141414" } },
+	["Fatality"] = { 5, { FontColor = "ffffff", MainColor = "1e1842", AccentColor = "c50754", BackgroundColor = "191335", OutlineColor = "3c355d" } },
+	["Jester"] = { 6, { FontColor = "ffffff", MainColor = "242424", AccentColor = "db4467", BackgroundColor = "1c1c1c", OutlineColor = "373737" } },
+	["Mint"] = { 7, { FontColor = "ffffff", MainColor = "242424", AccentColor = "3db488", BackgroundColor = "1c1c1c", OutlineColor = "373737" } },
+	["Tokyo Night"] = { 8, { FontColor = "ffffff", MainColor = "191925", AccentColor = "6759b3", BackgroundColor = "16161f", OutlineColor = "323232" } },
+	["Ubuntu"] = { 9, { FontColor = "ffffff", MainColor = "3e3e3e", AccentColor = "e2581e", BackgroundColor = "323232", OutlineColor = "191919" } },
+	["Quartz"] = { 10, { FontColor = "ffffff", MainColor = "232330", AccentColor = "426e87", BackgroundColor = "1d1b26", OutlineColor = "27232f" } },
+	["Nord"] = { 11, { FontColor = "eceff4", MainColor = "3b4252", AccentColor = "88c0d0", BackgroundColor = "2e3440", OutlineColor = "4c566a" } },
+	["Dracula"] = { 12, { FontColor = "f8f8f2", MainColor = "44475a", AccentColor = "ff79c6", BackgroundColor = "282a36", OutlineColor = "6272a4" } },
+	["Monokai"] = { 13, { FontColor = "f8f8f2", MainColor = "272822", AccentColor = "f92672", BackgroundColor = "1e1f1c", OutlineColor = "49483e" } },
+	["Gruvbox"] = { 14, { FontColor = "ebdbb2", MainColor = "3c3836", AccentColor = "fb4934", BackgroundColor = "282828", OutlineColor = "504945" } },
+	["Solarized"] = { 15, { FontColor = "839496", MainColor = "073642", AccentColor = "cb4b16", BackgroundColor = "002b36", OutlineColor = "586e75" } },
+	["Catppuccin"] = { 16, { FontColor = "d9e0ee", MainColor = "302d41", AccentColor = "f5c2e7", BackgroundColor = "1e1e2e", OutlineColor = "575268" } },
+	["One Dark"] = { 17, { FontColor = "abb2bf", MainColor = "282c34", AccentColor = "c678dd", BackgroundColor = "21252b", OutlineColor = "5c6370" } },
+	["Cyberpunk"] = { 18, { FontColor = "f9f9f9", MainColor = "262335", AccentColor = "00ff9f", BackgroundColor = "1a1a2e", OutlineColor = "413c5e" } },
+	["Oceanic Next"] = { 19, { FontColor = "d8dee9", MainColor = "1b2b34", AccentColor = "6699cc", BackgroundColor = "16232a", OutlineColor = "343d46" } },
+	["Material"] = { 20, { FontColor = "eeffff", MainColor = "212121", AccentColor = "82aaff", BackgroundColor = "151515", OutlineColor = "424242" } },
+	["Nya~!"] = { 21, { MainColor = "43505b", FontFace = "Gotham", FontColor = "ffffff", OutlineColor = "323232", BackgroundColor = "43505b", BackgroundImage = "85504522659236", AccentColor = "d7edff" } },
+	["Valentines"] = { 22, { FontColor = "ffffff", MainColor = "321b27", AccentColor = "ff4f81", BackgroundColor = "24131c", OutlineColor = "5a3044" } },
+	["St. Patrick's Day"] = { 23, { FontColor = "ffffff", MainColor = "182d20", AccentColor = "3ddc84", BackgroundColor = "0e1b13", OutlineColor = "31543d" } },
+	["Easter"] = { 24, { FontColor = "ffffff", MainColor = "302b3d", AccentColor = "c6a7ff", BackgroundColor = "211e2b", OutlineColor = "514963" } },
+	["Spooky Scary Skeletons"] = { 25, { FontColor = "ffffff", MainColor = "050717", AccentColor = "e36600", BackgroundColor = "03040d", OutlineColor = "000000", BackgroundImage = "7428858898", FontFace = "Code" } },
+	["Thanksgiving"] = { 26, { FontColor = "fff7ed", MainColor = "382719", AccentColor = "e68a2e", BackgroundColor = "24180f", OutlineColor = "62472d" } },
+	["Christmas"] = { 27, { MainColor = "070805", FontFace = "Code", FontColor = "ffffff", OutlineColor = "000000", BackgroundColor = "000000", BackgroundImage = "89924308622883", AccentColor = "242599" } },
+}
+
+Abysall.Analytics = SafeLoadComponent("Analytics")
 
 
 Abysall.SavePath = "Doors/Game"
@@ -302,6 +434,14 @@ local PortraitName = "MirrorRig_Portrait_" .. LocalPlayer.Name
 
 local Entities = {
 	["TV_Stand"] = {
+		Alias = "Noise_TV",
+		NotifyMessage = { Title = "Noise tv spawned.", Body = "Dont get near it" }
+	},
+	["Noise_TV"] = {
+		Alias = "Noise_TV",
+		NotifyMessage = { Title = "Noise tv spawned.", Body = "Dont get near it" }
+	},
+	["NoiseTV"] = {
 		Alias = "Noise_TV",
 		NotifyMessage = { Title = "Noise tv spawned.", Body = "Dont get near it" }
 	},
@@ -759,7 +899,7 @@ Globals.DoorsNotify = function(NotifyOptions)
 	end)
 end
 
-Globals.STX = loadstring(LoadedSource.STX)()
+Globals.STX = loadstring(LoadedSource.STX or GetScript("STX.luau", "https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Components/STX.luau"))()
 Functions.Notify = function(Settings)
 	local HiddenContainer = GetHiddenContainer()
 
@@ -1220,15 +1360,50 @@ Globals.PromptContainer.Name = "PromptContainer"
 Globals.PromptContainer.Parent = GetHiddenContainer()
 
 local ESPBlacklist = {}
+local RoomBasedESP = {}
+local RoomSignalConnection = nil
+
+local function UpdateRoomBasedESP()
+	local CurrentRoom = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+	if not CurrentRoom then return end
+	for Object, ESPOptions in pairs(RoomBasedESP) do
+		if not Object or Object.Parent == nil then
+			RoomBasedESP[Object] = nil
+			if Abysall and Abysall.ESPLibrary then
+				Abysall.ESPLibrary:RemoveESP(Object)
+			end
+		else
+			local ObjRoom = tonumber(Object:GetAttribute("ParentRoom"))
+			if ObjRoom == CurrentRoom or (table.find(Objects.Doors, Object) and ObjRoom == CurrentRoom + 1) then
+				if Abysall and Abysall.ESPLibrary and Abysall.ESPLibrary.ColorTable[Object] then
+					ESPOptions.Color = Abysall.ESPLibrary.ColorTable[Object]
+				end
+				if Abysall and Abysall.ESPLibrary then
+					Abysall.ESPLibrary:AddESP(ESPOptions)
+				end
+			else
+				if Abysall and Abysall.ESPLibrary then
+					Abysall.ESPLibrary:RemoveESP(Object)
+				end
+			end
+		end
+	end
+end
 
 Functions.AddESP = function(ESPOptions, RoomBased)
 	local Object = ESPOptions.Object
-
-	if table.find(ESPBlacklist, Object) then
+	if not Object or table.find(ESPBlacklist, Object) then
 		return
 	end
 
 	if RoomBased then
+		RoomBasedESP[Object] = ESPOptions
+
+		if not RoomSignalConnection then
+			RoomSignalConnection = LocalPlayer:GetAttributeChangedSignal("CurrentRoom"):Connect(UpdateRoomBasedESP)
+			table.insert(Connections, RoomSignalConnection)
+		end
+
 		local CurrentRoom = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
 		local ObjectRoom = tonumber(Object:GetAttribute("ParentRoom"))
 
@@ -1236,31 +1411,11 @@ Functions.AddESP = function(ESPOptions, RoomBased)
 			Abysall.ESPLibrary:AddESP(ESPOptions)
 		end
 
-		local RoomConnection = LocalPlayer:GetAttributeChangedSignal("CurrentRoom"):Connect(function()
-			if Abysall.ESPLibrary.ColorTable[Object] then
-				ESPOptions.Color = Abysall.ESPLibrary.ColorTable[Object]
-			end
-
-			local NewCurrentRoom = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
-			local ObjRoom = tonumber(Object:GetAttribute("ParentRoom"))
-
-			if ObjRoom == NewCurrentRoom or (table.find(Objects.Doors, Object) and ObjRoom == NewCurrentRoom + 1) then
-				Abysall.ESPLibrary:AddESP(ESPOptions)
-			else
-				Abysall.ESPLibrary:RemoveESP(Object)
-			end
-		end)
-
-		table.insert(Connections, RoomConnection)
-		ESPConnections[Object] = RoomConnection
-
 		Object.Destroying:Once(function()
-			RoomConnection:Disconnect()
-			if Abysall then
+			RoomBasedESP[Object] = nil
+			if Abysall and Abysall.ESPLibrary then
 				Abysall.ESPLibrary:RemoveESP(Object)
 			end
-			local Pos = table.find(Connections, RoomConnection)
-			if Pos then table.remove(Connections, Pos) end
 		end)
 	else
 		Abysall.ESPLibrary:AddESP(ESPOptions)
@@ -1268,6 +1423,7 @@ Functions.AddESP = function(ESPOptions, RoomBased)
 end
 
 Functions.RemoveESP = function(Object)
+	RoomBasedESP[Object] = nil
 	local Conn = ESPConnections[Object]
 	if Conn then
 		Conn:Disconnect()
@@ -1275,7 +1431,9 @@ Functions.RemoveESP = function(Object)
 		local Pos = table.find(Connections, Conn)
 		if Pos then table.remove(Connections, Pos) end
 	end
-	Abysall.ESPLibrary:RemoveESP(Object)
+	if Abysall and Abysall.ESPLibrary then
+		Abysall.ESPLibrary:RemoveESP(Object)
+	end
 end
 
 Functions.BlacklistESP = function(Object)
@@ -2824,8 +2982,8 @@ local function getNextClosedDoor()
 	local bestDoor = nil
 	local bestNumber = math.huge
 
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj.Name == "Door" and obj:IsA("Model") then
+	local function checkDoor(obj)
+		if obj and obj.Name == "Door" and obj:IsA("Model") then
 			local openAttr = obj:GetAttribute("Open")
 			if openAttr == false or openAttr == nil then
 				local roomModel = obj.Parent
@@ -2837,6 +2995,19 @@ local function getNextClosedDoor()
 				end
 			end
 		end
+	end
+
+	if Objects and Objects.Doors and #Objects.Doors > 0 then
+		for _, door in ipairs(Objects.Doors) do
+			checkDoor(door)
+		end
+		if bestDoor then return bestDoor end
+	end
+
+	local roomsContainer = CurrentRooms or Services.Workspace:FindFirstChild("CurrentRooms")
+	local searchContainer = roomsContainer or workspace
+	for _, obj in ipairs(searchContainer:GetDescendants()) do
+		checkDoor(obj)
 	end
 
 	return bestDoor
@@ -4401,44 +4572,277 @@ Toggles.OrbitDroppedItems:OnChanged(function(OrbitDroppedItemsEnabled)
 end)
 
 
-Toggles.BypassNoise:OnChanged(function(value)
-	for i = #Connections, 1, -1 do
-		local existingConnection = Connections[i]
-		if existingConnection and existingConnection.Disconnect then
-			existingConnection:Disconnect()
+local bypassNoiseToken = 0
+local bypassNoiseMiscChildAddedConnection = nil
+local bypassNoisePromptTriggeredConnection = nil
+
+-- ==============================================================================
+-- НАСТРОЙКИ ДЛЯ NOISE TV BREAKER (ИЗМЕНЯЙТЕ ПАРАМЕТРЫ ЗДЕСЬ):
+local TV_BREAKER_OFFSET_Y = 5      -- Подъем телевизора вверх в студах (по умолчанию 5)
+local TV_BREAKER_ROTATION_Y = 180  -- Поворот вокруг оси Y в градусах (по умолчанию 180)
+local TV_BREAKER_VELOCITY_Y = 0    -- Дополнительная вертикальная скорость (0 = естественное падение)
+-- ==============================================================================
+
+local function IsConnectedToCharacter(instance, char)
+	if not instance or not char then return false end
+	if instance:IsA("JointInstance") or instance:IsA("WeldConstraint") then
+		return (instance.Part0 and instance.Part0:IsDescendantOf(char))
+			or (instance.Part1 and instance.Part1:IsDescendantOf(char))
+	elseif instance:IsA("Constraint") then
+		local p0 = instance.Attachment0 and instance.Attachment0.Parent
+		local p1 = instance.Attachment1 and instance.Attachment1.Parent
+		return (p0 and p0:IsDescendantOf(char))
+			or (p1 and p1:IsDescendantOf(char))
+	end
+	return false
+end
+
+local function DisconnectFromCharacter(tvStand, char)
+	if not char or not tvStand then return end
+	for _, desc in ipairs(tvStand:GetDescendants()) do
+		if IsConnectedToCharacter(desc, char) then
+			pcall(function() desc:Destroy() end)
 		end
-		table.remove(Connections, i)
+	end
+	for _, desc in ipairs(char:GetDescendants()) do
+		if IsConnectedToCharacter(desc, tvStand) then
+			pcall(function() desc:Destroy() end)
+		end
+	end
+	if tvStand:IsDescendantOf(char) then
+		local misc = workspace:FindFirstChild("Misc") or workspace
+		tvStand.Parent = misc
+	end
+end
+
+local function IsTvHeldByPlayer(tvStand, char)
+	if not tvStand or not char then return false end
+
+	-- 1. Объект физически внутри персонажа
+	if tvStand:IsDescendantOf(char) then
+		return true
+	end
+
+	-- 2. Внутри персонажа есть Tool с моделью или частью ТВ
+	for _, child in ipairs(char:GetChildren()) do
+		if child:IsA("Tool") then
+			local n = child.Name
+			if n == "TV_Stand" or n == "TV" or n == "Noise_TV" or n == "NoiseTV" then
+				return true
+			end
+			if child:FindFirstChild("TV_Stand") or child:FindFirstChild("TV") then
+				return true
+			end
+		end
+	end
+
+	-- 3. Наличие физической связи (Weld, Motor6D, Constraint) между ТВ и персонажем
+	for _, desc in ipairs(tvStand:GetDescendants()) do
+		if IsConnectedToCharacter(desc, char) then
+			return true
+		end
+	end
+	for _, desc in ipairs(char:GetDescendants()) do
+		if IsConnectedToCharacter(desc, tvStand) then
+			return true
+		end
+	end
+
+	-- 4. Атрибуты владения или переноски предмета
+	local holder = tvStand:GetAttribute("Holder") or tvStand:GetAttribute("HeldBy") or tvStand:GetAttribute("Carrier")
+	if holder and (holder == LocalPlayer.Name or holder == LocalPlayer.UserId) then
+		return true
+	end
+	if tvStand:GetAttribute("IsHeld") == true or tvStand:GetAttribute("Held") == true then
+		return true
+	end
+
+	local charHolding = char:GetAttribute("Holding") or char:GetAttribute("Carrying") or char:GetAttribute("HeldItem")
+	if charHolding and typeof(charHolding) == "string" and (charHolding:find("TV") or charHolding:find("Noise")) then
+		return true
+	end
+
+	-- 5. Игрок только что завершил взаимодействие (взял в руки по ProximityPrompt) и находится вплотную (<= 5.5 studs)
+	if tvStand:GetAttribute("Abysall_PlayerInteracted") == true then
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local ok, pivot = pcall(function() return tvStand:GetPivot() end)
+			if ok and pivot and (pivot.Position - hrp.Position).Magnitude <= 5.5 then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+local function BreakBypassNoiseTvStand(tvStand)
+	if not tvStand or not tvStand.Parent or not tvStand:IsDescendantOf(game) then return end
+	if tvStand:GetAttribute("Abysall_BypassNoise_Dropped") then return end
+	tvStand:SetAttribute("Abysall_BypassNoise_Dropped", true)
+
+	local char = LocalPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+	-- 1. Разрываем любые крепления к персонажу, чтобы игрок не полетел вниз вместе с ТВ
+	DisconnectFromCharacter(tvStand, char)
+
+	-- 2. Симуляция сброса / броска (клавиша 'X' и Remote DropItem при наличии Tool)
+	pcall(function()
+		if keypress and keyrelease then
+			keypress(0x58)
+			task.wait(0.02)
+			keyrelease(0x58)
+		elseif Abysall and Abysall.Environment and Abysall.Environment.keypress and Abysall.Environment.keyrelease then
+			Abysall.Environment.keypress(0x58)
+			task.wait(0.02)
+			Abysall.Environment.keyrelease(0x58)
+		end
+	end)
+
+	if char then
+		local tool = char:FindFirstChildWhichIsA("Tool")
+		if tool and (tool.Name == "TV_Stand" or tool.Name == "TV" or tool.Name == "Noise_TV" or tool.Name == "NoiseTV") then
+			pcall(function()
+				local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("RemotesFolder")
+				if remotes and remotes:FindFirstChild("DropItem") then
+					remotes.DropItem:FireServer(tool)
+				end
+			end)
+		end
+	end
+
+	-- 3. Активируем любые ProximityPrompt внутри ТВ (на бросок/действие)
+	for _, prompt in ipairs(tvStand:GetDescendants()) do
+		if prompt:IsA("ProximityPrompt") and prompt.Enabled and fireproximityprompt then
+			pcall(fireproximityprompt, prompt)
+		end
+	end
+
+	-- 4. Снимаем Anchored со всех деталей телевизора
+	for _, part in ipairs(tvStand:GetDescendants()) do
+		if part:IsA("BasePart") then
+			pcall(function()
+				part.Anchored = false
+				part.CanCollide = true
+			end)
+		end
+	end
+
+	-- 5. Поднимаем ТВ вверх и разворачиваем по оси Y согласно настройкам
+	local ok, tvPivot = pcall(function() return tvStand:GetPivot() end)
+	if ok and tvPivot then
+		local newCFrame = (tvPivot + Vector3.new(0, TV_BREAKER_OFFSET_Y, 0)) * CFrame.Angles(0, math.rad(TV_BREAKER_ROTATION_Y), 0)
+
+		pcall(function()
+			tvStand:PivotTo(newCFrame)
+		end)
+
+		-- 6. Дополнительная скорость (если задана в TV_BREAKER_VELOCITY_Y выше)
+		if TV_BREAKER_VELOCITY_Y ~= 0 then
+			for _, part in ipairs(tvStand:GetDescendants()) do
+				if part:IsA("BasePart") then
+					pcall(function()
+						part.AssemblyLinearVelocity = Vector3.new(0, TV_BREAKER_VELOCITY_Y, 0)
+						part.Velocity = Vector3.new(0, TV_BREAKER_VELOCITY_Y, 0)
+					end)
+				end
+			end
+		end
+	end
+end
+
+Toggles.BypassNoise:OnChanged(function(value)
+	bypassNoiseToken += 1
+	if bypassNoiseMiscChildAddedConnection then
+		bypassNoiseMiscChildAddedConnection:Disconnect()
+		bypassNoiseMiscChildAddedConnection = nil
+	end
+	if bypassNoisePromptTriggeredConnection then
+		bypassNoisePromptTriggeredConnection:Disconnect()
+		bypassNoisePromptTriggeredConnection = nil
 	end
 
 	if not value then return end
 
-	local function checkBypassNoiseTvStand(targetTvStand)
-		if not targetTvStand:IsA("Model") then return end
-		if targetTvStand.Name ~= "TV_Stand" then return end
+	local currentToken = bypassNoiseToken
 
-		local tvStandCurrentCFrame = targetTvStand:GetPivot()
+	-- Отслеживаем взаимодействие игрока с ProximityPrompt телевизора
+	if Services.ProximityPromptService then
+		bypassNoisePromptTriggeredConnection = Services.ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
+			if currentToken ~= bypassNoiseToken or not Toggles.BypassNoise.Value then return end
+			if player == LocalPlayer and prompt and prompt.Parent then
+				local topTv = prompt:FindFirstAncestor("TV_Stand") or prompt:FindFirstAncestor("Noise_TV") or prompt:FindFirstAncestor("NoiseTV")
+				if topTv then
+					topTv:SetAttribute("Abysall_PlayerInteracted", true)
+				end
+			end
+		end)
+	end
 
-		if tvStandCurrentCFrame.Position.Y > -119 then
-			targetTvStand:PivotTo(CFrame.new(
-				tvStandCurrentCFrame.Position.X,
-				-120,
-				tvStandCurrentCFrame.Position.Z
-			))
+	local function CheckAndBreak(targetTvStand)
+		if not targetTvStand or not targetTvStand:IsA("Model") then return end
+		local name = targetTvStand.Name
+		if name ~= "TV_Stand" and name ~= "Noise_TV" and name ~= "NoiseTV" then return end
+		if targetTvStand:GetAttribute("Abysall_BypassNoise_Dropped") then return end
+
+		local char = LocalPlayer.Character
+		if not char then return end
+
+		-- Срабатываем ИСКЛЮЧИТЕЛЬНО если телевизор взят игроком в руки
+		if IsTvHeldByPlayer(targetTvStand, char) then
+			BreakBypassNoiseTvStand(targetTvStand)
 		end
 	end
 
 	local bypassNoiseMiscFolder = workspace:FindFirstChild("Misc")
-	if not bypassNoiseMiscFolder then return end
-
-	local bypassNoiseMiscChildAddedConnection = bypassNoiseMiscFolder.ChildAdded:Connect(function(bypassNoiseNewChild)
-		checkBypassNoiseTvStand(bypassNoiseNewChild)
-	end)
-
-	Connections[#Connections + 1] = bypassNoiseMiscChildAddedConnection
-
-	for _, bypassNoiseMiscChild in ipairs(bypassNoiseMiscFolder:GetChildren()) do
-		checkBypassNoiseTvStand(bypassNoiseMiscChild)
+	if bypassNoiseMiscFolder then
+		bypassNoiseMiscChildAddedConnection = bypassNoiseMiscFolder.ChildAdded:Connect(function(newChild)
+			if currentToken ~= bypassNoiseToken or not Toggles.BypassNoise.Value then return end
+			CheckAndBreak(newChild)
+		end)
 	end
+
+	task.spawn(function()
+		while Toggles.BypassNoise.Value and currentToken == bypassNoiseToken do
+			local char = LocalPlayer.Character
+			if char then
+				local candidates = {}
+				local function addCand(m)
+					if m and m:IsA("Model") then
+						local n = m.Name
+						if (n == "TV_Stand" or n == "Noise_TV" or n == "NoiseTV") and not m:GetAttribute("Abysall_BypassNoise_Dropped") then
+							table.insert(candidates, m)
+						end
+					end
+				end
+
+				local misc = workspace:FindFirstChild("Misc")
+				if misc then
+					for _, c in ipairs(misc:GetChildren()) do addCand(c) end
+				end
+				for _, c in ipairs(workspace:GetChildren()) do addCand(c) end
+
+				local curRooms = workspace:FindFirstChild("CurrentRooms")
+				if curRooms then
+					for _, r in ipairs(curRooms:GetChildren()) do
+						local assets = r:FindFirstChild("Assets")
+						if assets then
+							for _, c in ipairs(assets:GetChildren()) do addCand(c) end
+						end
+						for _, c in ipairs(r:GetChildren()) do addCand(c) end
+					end
+				end
+
+				for _, c in ipairs(char:GetChildren()) do addCand(c) end
+
+				for _, tv in ipairs(candidates) do
+					CheckAndBreak(tv)
+				end
+			end
+			task.wait(0.1)
+		end
+	end)
 end)
 
 Toggles.DroppedItemValue:OnChanged(function(DroppedItemValue)
@@ -4503,7 +4907,7 @@ Groupboxes.Exploits_BypassRight:AddToggle("DisableAnticheat", {
 })
 Groupboxes.Exploits_BypassRight:AddToggle("VelocityManipulationToggle", {
 	Text = "Velocity Manipulation", Default = false,
-	Tooltip = "Moves your character forward slowly, mitigating the game's anti-noclip."
+	Tooltip = "Moves your character slowly, mitigating the game's anti-noclip. Supports vertical movement (Space/Ctrl or Camera pitch)."
 })
 Toggles.DisableAnticheat:OnChanged(function(Value)
 	if Globals.AnticheatDisabled == true and not Value then
@@ -4518,6 +4922,10 @@ Toggles.VelocityManipulationToggle:AddKeyPicker("VelocityManipulationKeybind", {
 Groupboxes.Exploits_BypassRight:AddDropdown("VelocityManipulationMode", {
 	Values = {"Velocity", "Pivot"}, Text = "Manipulation Method",
 	Default = 1,
+})
+Groupboxes.Exploits_BypassRight:AddSlider("VelocityManipulationSpeed", {
+	Text = "Manipulation Speed", Min = 1, Max = 10, Default = 2.25, Rounding = 2, Compact = true,
+	Tooltip = "Speed of the velocity manipulation."
 })
 
 Groupboxes.Exploits_BypassRight:AddDivider()
@@ -4639,81 +5047,24 @@ Groupboxes.Exploits_BypassRight:AddToggle("PositionSpoof", {
 	Text = "Position Spoof", Default = false,
 	Tooltip = "Makes your character appear underground on the server, protecting you from rush-like entities."
 })
-Groupboxes.Exploits_BypassRight:AddToggle("AutoPositionSpoof", {
-	Text = "Auto Position Spoof", Default = false,
-	Tooltip = "Automatically enables Position Spoof when an entity spawns, and disables it when the entity is gone."
-})
 Groupboxes.Exploits_BypassRight:AddToggle("CrouchSpoof", {
 	Text = "Crouch Spoof", Default = false, Tooltip = "Makes the game think you are always crouching."
 })
-
-Globals.AutoSpoofed = false
-
-local SpoofMonstersList = {
-	["RushMoving"]     = true,
-	["AmbushMoving"]   = true,
-	["BackdoorRush"]   = true,
-	["A60"]            = true,
-	["A120"]           = true,
-	["GlitchRush"]     = true,
-	["GlitchAmbush"]   = true,
-	["BashMoving"]     = true,
-	["DronesStampede"] = true,
-	["Scribbles"]      = true,
-	["CustomEntity"]   = true,
-	["FrozenAmbush"]   = true,
-}
-
-local lastMonsterCheck = 0
-local cachedMonsterAround = false
-
-local function IsSpoofMonsterAround()
-	local now = tick()
-	if now - lastMonsterCheck < 0.15 then
-		return cachedMonsterAround
-	end
-	lastMonsterCheck = now
-
-	for _, child in ipairs(Services.Workspace:GetChildren()) do
-		if SpoofMonstersList[child.Name] then
-			cachedMonsterAround = true
-			return true
-		end
-	end
-	local liveEnts = Services.Workspace:FindFirstChild("LiveEntities")
-	if liveEnts then
-		for _, child in ipairs(liveEnts:GetChildren()) do
-			if SpoofMonstersList[child.Name] then
-				cachedMonsterAround = true
-				return true
-			end
-		end
-	end
-
-	cachedMonsterAround = false
-	return false
-end
-
--- Возвращаем классический функционал Position Spoof
 Toggles.PositionSpoof:OnChanged(function(Value)
-	if Floor ~= "Fools" and Floor ~= "OldHotel" and RootPart and Humanoid then
+	if Floor ~= "Fools" and Floor ~= "OldHotel" then
 		if Value then
 			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
 			Humanoid.HipHeight = 0.05
-			if RemotesFolder:FindFirstChild("Crouch") then
-				RemotesFolder.Crouch:FireServer(true, true)
-			end
+			RemotesFolder.Crouch:FireServer(true, true)
 		else
 			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
 			Humanoid.HipHeight = 2.396
 		end
 	end
 end)
-
 Toggles.PositionSpoof:AddKeyPicker("PositionSpoof", {
 	Text = "Position Spoof", Default = "B", Mode = "Toggle", SyncToggleState = true
 })
-
 Toggles.CrouchSpoof:OnChanged(function(Value)
 	if RemotesFolder:FindFirstChild("Crouch") then
 		RemotesFolder.Crouch:FireServer(Value and true or Functions.IsCrouching(), true)
@@ -6231,7 +6582,7 @@ Groupboxes.Floors_Farming:AddButton({
 	DoubleClick = true,
 	Tooltip = "Automatically farms deaths, joining new runs.",
 	Func = function()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Scripts/DeathFarm.luau"))()
+		loadstring(GetScript("DeathFarm.luau", "https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Scripts/DeathFarm.luau"))()
 	end,
 
 	Disabled = not Functions.CheckCompatability({"fireproximityprompt", "firesignal"}),
@@ -6380,6 +6731,9 @@ Functions.HandleCharacter = function(NewCharacter)
 	Camera   = Services.Workspace.CurrentCamera
 
 	Globals.OldCamera = Camera
+	if Functions.HookCamera then
+		Functions.HookCamera(Camera)
+	end
 	Globals.MainUI = LocalPlayer.PlayerGui.MainUI
 
 	Collision = NewCharacter:WaitForChild("Collision")
@@ -6518,6 +6872,7 @@ Functions.HandleCharacter = function(NewCharacter)
 		RootPart.CustomPhysicalProperties.FrictionWeight,
 		RootPart.CustomPhysicalProperties.ElasticityWeight
 	)
+
 	for _, Part in NewCharacter:GetDescendants() do
 		if Part:IsA("BasePart") then
 			PartProperties[Part] = Part.CustomPhysicalProperties
@@ -6766,8 +7121,57 @@ Functions.HandleCharacter = function(NewCharacter)
 	end
 
 	Connections.MainHandler = Services.RunService.RenderStepped:Connect(function()
-		if Services.Workspace:FindFirstChild("Camera") then
+		if Services.Workspace.CurrentCamera then
+			Camera = Services.Workspace.CurrentCamera
+		elseif Services.Workspace:FindFirstChild("Camera") then
 			Camera = Services.Workspace:FindFirstChild("Camera")
+		end
+
+		-- Быстрое отслеживание и видимость Noise / NoiseModel
+		local function ProcessNoiseEntity(noiseInst)
+			if not noiseInst or not noiseInst.Parent then return end
+			if not noiseInst:GetAttribute("Abysall_NoiseHandled") then
+				noiseInst:SetAttribute("Abysall_NoiseHandled", true)
+				if Functions.HandleEntitySpawn then
+					task.spawn(Functions.HandleEntitySpawn, noiseInst)
+				end
+			end
+			if not noiseInst:GetAttribute("Abysall_VisibleFixed") then
+				noiseInst:SetAttribute("Abysall_VisibleFixed", true)
+				if noiseInst:IsA("BasePart") and noiseInst.Name ~= "HumanoidRootPart" then
+					noiseInst.Transparency = 0
+					noiseInst.LocalTransparencyModifier = 0
+				end
+				for _, part in ipairs(noiseInst:GetDescendants()) do
+					if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+						part.Transparency = 0
+						part.LocalTransparencyModifier = 0
+					elseif part:IsA("Decal") or part:IsA("Texture") then
+						part.Transparency = 0
+					end
+				end
+			end
+		end
+
+		local activeCam = Services.Workspace.CurrentCamera or Camera or Services.Workspace:FindFirstChild("Camera")
+		if activeCam then
+			local noiseInCam = activeCam:FindFirstChild("NoiseModel") or activeCam:FindFirstChild("Noise")
+			if noiseInCam then ProcessNoiseEntity(noiseInCam) end
+		end
+
+		local nowTick = tick()
+		if not Globals.LastNoiseCheck or (nowTick - Globals.LastNoiseCheck > 0.5) then
+			Globals.LastNoiseCheck = nowTick
+			local wsNoise = Services.Workspace:FindFirstChild("NoiseModel") or Services.Workspace:FindFirstChild("Noise")
+			if not wsNoise then
+				local liveEnts = Services.Workspace:FindFirstChild("LiveEntities")
+				if liveEnts then
+					wsNoise = liveEnts:FindFirstChild("NoiseModel") or liveEnts:FindFirstChild("Noise")
+				end
+			end
+			if wsNoise and wsNoise.Name ~= "TV_Stand" and wsNoise.Name ~= "Noise_TV" and wsNoise.Name ~= "NoiseTV" and not wsNoise:FindFirstAncestor("TV_Stand") and not wsNoise:FindFirstAncestor("Noise_TV") then
+				ProcessNoiseEntity(wsNoise)
+			end
 		end
 
 		if Toggles.SpeedBoostToggle.Value then
@@ -6781,8 +7185,8 @@ Functions.HandleCharacter = function(NewCharacter)
 		Globals.IsEyes    = Services.Workspace:FindFirstChild("Eyes") ~= nil or Services.Workspace:FindFirstChild("Lookman") ~= nil
 		Globals.IsLookman = Services.Workspace:FindFirstChild("BackdoorLookman") ~= nil
 
-		if Toggles.AmbientToggle.Value then
-			Services.TweenService:Create(Services.Lighting, TweenInfo.new(0.2, Enum.EasingStyle.Exponential), { Ambient = Options.AmbientColor.Value }):Play()
+		if Toggles.AmbientToggle.Value and Services.Lighting.Ambient ~= Options.AmbientColor.Value then
+			Services.Lighting.Ambient = Options.AmbientColor.Value
 		end
 
 		if Main_Game then
@@ -6810,17 +7214,6 @@ Functions.HandleCharacter = function(NewCharacter)
 			end
 		end
 
--- Авто-включение и отключение Position Spoof при монстрах
-		if Toggles.AutoPositionSpoof and Toggles.AutoPositionSpoof.Value then
-			local monsterAround = IsSpoofMonsterAround()
-			if monsterAround and not Toggles.PositionSpoof.Value then
-				Globals.AutoSpoofed = true
-				Toggles.PositionSpoof:SetValue(true)
-			elseif not monsterAround and Toggles.PositionSpoof.Value and Globals.AutoSpoofed then
-				Globals.AutoSpoofed = false
-				Toggles.PositionSpoof:SetValue(false)
-			end
-		end
 
 		if (Toggles.CrouchSpoof.Value or Toggles.PositionSpoof.Value) and RemotesFolder:FindFirstChild("Crouch") then
 			RemotesFolder.Crouch:FireServer(true, true)
@@ -6881,10 +7274,40 @@ Functions.HandleCharacter = function(NewCharacter)
 		end
 
 		CollisionClone.CollisionGroup = Collision.CollisionGroup
+		CollisionClone.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and 1.75 or 0.18, 0)
 
 		if Toggles.VelocityManipulationToggle.Value and Options.VelocityManipulationMode.Value == "Velocity" then
+			local speed = (Options.VelocityManipulationSpeed and Options.VelocityManipulationSpeed.Value) or 2.25
+			local camLook = Camera and Camera.CFrame.LookVector or RootPart.CFrame.LookVector
+			local verticalInput = 0
+			if not Globals.IsTyping then
+				if Services.UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+					verticalInput = verticalInput + 1
+				end
+				if Services.UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+					or Services.UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+					or Services.UserInputService:IsKeyDown(Enum.KeyCode.C)
+					or Services.UserInputService:IsKeyDown(Enum.KeyCode.Q)
+				then
+					verticalInput = verticalInput - 1
+				end
+			end
+
+			local moveVelocity
+			if verticalInput ~= 0 then
+				local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
+				if flatLook.Magnitude > 0.01 then
+					flatLook = flatLook.Unit
+				else
+					flatLook = Vector3.new(RootPart.CFrame.LookVector.X, 0, RootPart.CFrame.LookVector.Z).Unit
+				end
+				moveVelocity = (flatLook * speed) + Vector3.new(0, verticalInput * speed, 0)
+			else
+				moveVelocity = camLook * speed
+			end
+
 			Globals.ManipulateBody.Parent = RootPart
-			Globals.ManipulateBody.Velocity = RootPart.CFrame.LookVector * 2.25
+			Globals.ManipulateBody.Velocity = moveVelocity
 		else
 			Globals.ManipulateBody.Parent = nil
 		end
@@ -7859,6 +8282,16 @@ local IgnoredClasses = {
 }
 
 Connections.InstanceHandler = Services.Workspace.DescendantAdded:Connect(function(Object)
+	local name = Object.Name
+	local isTV = name == "TV_Stand" or name == "Noise_TV" or name == "NoiseTV"
+	local isNoise = not isTV and (name == "Noise" or name == "NoiseModel" or (typeof(name) == "string" and string.find(name, "Noise") ~= nil and not string.find(name, "TV")))
+
+	if isTV or isNoise or Entities[name] then
+		local isInsideTV = not isTV and (Object:FindFirstAncestor("TV_Stand") or Object:FindFirstAncestor("Noise_TV"))
+		if not isInsideTV and Functions.HandleEntitySpawn then
+			task.spawn(Functions.HandleEntitySpawn, Object)
+		end
+	end
 	if IgnoredClasses[Object.ClassName] then return end
 	Functions.QueueObject(Object)
 end)
@@ -8146,7 +8579,7 @@ Globals.LastAutoInteractFire = tick()
 Connections.AutoInteract = Services.RunService.Heartbeat:Connect(function()
 	local Active = Toggles.AutoInteractToggle.Value or Options.AutoInteractKeybind:GetState()
     if not Active then return end
-    if tick() - Globals.LastAutoInteractFire < 1/60 then return end
+    if tick() - Globals.LastAutoInteractFire < 0.07 then return end
 
 	for _, Prompt in Objects.Prompts do
         if Prompt:GetAttribute("ParentRoom") and tonumber(Prompt:GetAttribute("ParentRoom")) ~= tonumber(LocalPlayer:GetAttribute("CurrentRoom")) then continue end
@@ -8265,41 +8698,148 @@ end)
 
 local RusherAliases = { Rush=true, Bash=true, Scribbles=true, DronesStampede=true, Ambush=true, Eyes=true, Lookman=true, Blitz=true, ["A-60"]=true, ["A-120"]=true, AR0xMBUSH=true, ["RNIUSHCG=="]=true, ["Custom Entity"]=true }
 
-local function HandleEntitySpawn(Entity)
+Functions.HandleEntitySpawn = function(Entity)
 	if not Entity or typeof(Entity) ~= "Instance" then return end
 
 	local Model = Entity
 	if Entity:IsA("Humanoid") then
 		Model = Entity.Parent
 	end
-	if not Model or not Model:IsA("Model") then return end
+	if not Model or (not Model:IsA("Model") and not Model:IsA("Folder") and not Model:IsA("BasePart")) then return end
 
-	local EntityData = Entities[Model.Name]
-	if not EntityData then return end
-	if Model:GetAttribute("Abysall_EntityHandled") then return end
-	Model:SetAttribute("Abysall_EntityHandled", true)
-
-	while not Model.PrimaryPart do
-		for _, Child in Model:GetChildren() do
-			if Child:IsA("BasePart") then Model.PrimaryPart = Child end
-		end
-		if not Model.PrimaryPart then task.wait() end
+	-- Если объект находится внутри TV_Stand (или сам является TV_Stand), находим корневой TV_Stand
+	local topTV = nil
+	if Model.Name == "TV_Stand" or Model.Name == "Noise_TV" or Model.Name == "NoiseTV" then
+		topTV = Model
+	else
+		topTV = Model:FindFirstAncestor("TV_Stand") or Model:FindFirstAncestor("Noise_TV")
 	end
-	task.wait(0.1)
 
-	if not Model.PrimaryPart or LocalPlayer:DistanceFromCharacter(Model.PrimaryPart.Position) >= 10000 then return end
+	if topTV then
+		Model = topTV
+		if Model:GetAttribute("Abysall_TV_Handled") then return end
+		Model:SetAttribute("Abysall_TV_Handled", true)
+		Model:SetAttribute("Abysall_EntityHandled", true)
+	else
+		if Model:GetAttribute("Abysall_EntityHandled") then return end
+		Model:SetAttribute("Abysall_EntityHandled", true)
+	end
+
+	local EntityData = nil
+	if topTV then
+		EntityData = Entities["TV_Stand"] or Entities["Noise_TV"]
+	else
+		EntityData = Entities[Model.Name]
+		if not EntityData then
+			local name = Model.Name
+			if name == "Noise" or name == "NoiseModel" or (typeof(name) == "string" and string.find(name, "Noise") ~= nil and not string.find(name, "TV")) then
+				EntityData = Entities["NoiseModel"] or Entities["Noise"]
+			end
+			if not EntityData then return end
+		end
+	end
+
+	local isTV = (topTV ~= nil)
+	local isNoise = not isTV and (Model.Name == "Noise" or Model.Name == "NoiseModel" or (typeof(Model.Name) == "string" and string.find(Model.Name, "Noise") ~= nil) or (EntityData and EntityData.Alias == "Noise"))
+	local currentActiveCam = Services.Workspace.CurrentCamera or Camera or Services.Workspace:FindFirstChild("Camera")
+	local isCameraChild = currentActiveCam and Model:IsDescendantOf(currentActiveCam)
+
+	-- Для Noise / NoiseModel или объектов в Camera немедленно форсируем 100% видимость
+	if isNoise or isCameraChild then
+		local function ForcePartVisible(Part)
+			if Part:IsA("BasePart") and Part.Name ~= "HumanoidRootPart" then
+				Part.Transparency = 0
+				Part.LocalTransparencyModifier = 0
+				Part.CastShadow = true
+
+				local c1 = Part:GetPropertyChangedSignal("LocalTransparencyModifier"):Connect(function()
+					if Part.LocalTransparencyModifier > 0 then
+						Part.LocalTransparencyModifier = 0
+					end
+				end)
+				local c2 = Part:GetPropertyChangedSignal("Transparency"):Connect(function()
+					if Part.Transparency > 0 then
+						Part.Transparency = 0
+					end
+				end)
+				Part.Destroying:Once(function()
+					c1:Disconnect()
+					c2:Disconnect()
+				end)
+			elseif Part:IsA("Decal") or Part:IsA("Texture") then
+				Part.Transparency = 0
+				local c = Part:GetPropertyChangedSignal("Transparency"):Connect(function()
+					if Part.Transparency > 0 then
+						Part.Transparency = 0
+					end
+				end)
+				Part.Destroying:Once(function()
+					c:Disconnect()
+				end)
+			end
+		end
+
+		if Model:IsA("BasePart") then
+			ForcePartVisible(Model)
+		end
+		for _, Part in ipairs(Model:GetDescendants()) do
+			ForcePartVisible(Part)
+		end
+		Model.DescendantAdded:Connect(function(Part)
+			ForcePartVisible(Part)
+		end)
+	end
+
+	-- Безопасный поиск PrimaryPart с поддержкой BasePart, Model и Folder
+	local primaryPart = nil
+	if Model:IsA("BasePart") then
+		primaryPart = Model
+	elseif Model:IsA("Model") then
+		primaryPart = Model.PrimaryPart
+		if not primaryPart then
+			local startWait = tick()
+			while not Model.PrimaryPart and (tick() - startWait < 2) do
+				for _, Child in ipairs(Model:GetChildren()) do
+					if Child:IsA("BasePart") then
+						Model.PrimaryPart = Child
+						primaryPart = Child
+						break
+					end
+				end
+				if not Model.PrimaryPart then
+					local anyPart = Model:FindFirstChildWhichIsA("BasePart", true)
+					if anyPart then
+						Model.PrimaryPart = anyPart
+						primaryPart = anyPart
+						break
+					end
+					task.wait(0.05)
+				end
+			end
+			primaryPart = Model.PrimaryPart or Model:FindFirstChildWhichIsA("BasePart", true)
+		end
+	elseif Model:IsA("Folder") then
+		primaryPart = Model:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	if not isNoise and not isTV and not isCameraChild then
+		if not primaryPart or LocalPlayer:DistanceFromCharacter(primaryPart.Position) >= 10000 then return end
+	end
 
 	local Alias = EntityData.Alias
 	local RealAlias = Alias
 	if Options.EntityList.Value[Alias] and Toggles.NotifyEntities.Value then
 		local NotifyTitle = EntityData.NotifyMessage.Title
 		local NotifyBody  = EntityData.NotifyMessage.Body
-		local NotifyImage = EntityIcons[Model.Name]
+		local NotifyImage = EntityIcons[Model.Name] or EntityIcons[Alias]
 
-		if Model.Name == "RushMoving" and Model.PrimaryPart.Name ~= "RushNew" then
-			NotifyTitle = NotifyTitle:gsub("Rush", Model.PrimaryPart.Name)
-			NotifyImage = Model.PrimaryPart:WaitForChild("Attachment").ParticleEmitter.Texture
-			Alias = Model.PrimaryPart.Name
+		if Model.Name == "RushMoving" and primaryPart and primaryPart.Name ~= "RushNew" then
+			NotifyTitle = NotifyTitle:gsub("Rush", primaryPart.Name)
+			local att = primaryPart:WaitForChild("Attachment", 2)
+			if att and att:FindFirstChild("ParticleEmitter") then
+				NotifyImage = att.ParticleEmitter.Texture
+			end
+			Alias = primaryPart.Name
 		end
 
 		Functions.Notify({ Title = NotifyTitle, Body = NotifyBody, Image = NotifyImage, Time = Toggles.NotifyKeepNotifications.Value and Model or nil })
@@ -8309,31 +8849,27 @@ local function HandleEntitySpawn(Entity)
 		end
 	end
 
-	-- Принудительное исправление невидимости/прозрачности модели Noise
-	if Model.Name == "Noise" or Model.Name == "NoiseModel" then
-		for _, Part in ipairs(Model:GetDescendants()) do
-			if Part:IsA("BasePart") and Part.Name ~= "HumanoidRootPart" then
-				if Part.Transparency > 0.5 then
-					Part.Transparency = 0
-				end
-			end
+	if isTV then
+		-- Подсвечиваем саму модель TV_Stand целиком, чтобы весь телевизор нойса подсвечивался полностью
+		local espTarget = (Model:IsA("Model") and Model) or primaryPart or Model
+		if Toggles.EntityESPToggle.Value and Options.EntityESPOptions.Value["Noise_TV"] then
+			Functions.AddESP({ Object = espTarget, Text = "Noise_TV", Color = Options.EntityESPColor.Value })
 		end
-	end
-
-	if Model.Name ~= "GloombatSwarm" then
+		table.insert(Objects.Entities, espTarget)
+	elseif Model.Name ~= "GloombatSwarm" then
 		if Toggles.EntityESPToggle.Value and Options.EntityESPOptions.Value[RealAlias] then
-			if Model.Name == "MonumentEntity" then
-				Functions.AddESP({ Object = Model.Top, Text = Alias, Color = Options.EntityESPColor.Value })
-			else
-				Functions.AddESP({ Object = Model, Text = Alias, Color = Options.EntityESPColor.Value })
+			local espTarget = (Model:IsA("Model") and Model) or primaryPart or Model
+			if Model.Name == "MonumentEntity" and Model:FindFirstChild("Top") then
+				espTarget = Model.Top
 			end
+			Functions.AddESP({ Object = espTarget, Text = Alias, Color = Options.EntityESPColor.Value })
 		end
 		table.insert(Objects.Entities, Model)
 	end
 
 	if RusherAliases[EntityData.Alias] then
 		Instance.new("Humanoid", Model).Name = "HighlightHumanoid"
-		local Root = Model.PrimaryPart
+		local Root = Model:IsA("Model") and Model.PrimaryPart or primaryPart
 		if Root then Root.Transparency = 0.999 Root.Material = Enum.Material.Plastic end
 	end
 
@@ -8344,6 +8880,38 @@ local function HandleEntitySpawn(Entity)
 	end
 end
 
+local function HandleEntitySpawn(Entity)
+	return Functions.HandleEntitySpawn(Entity)
+end
+
+Functions.HookCamera = function(cam)
+	if not cam then return end
+	if Connections.CameraEntityHandler then
+		Connections.CameraEntityHandler:Disconnect()
+		Connections.CameraEntityHandler = nil
+	end
+	if Connections.CameraDescendantHandler then
+		Connections.CameraDescendantHandler:Disconnect()
+		Connections.CameraDescendantHandler = nil
+	end
+
+	local function CheckCamEntity(child)
+		if not child or not child.Parent then return end
+		local cname = child.Name
+		local isNoise = cname == "Noise" or cname == "NoiseModel" or (typeof(cname) == "string" and string.find(cname, "Noise") ~= nil and not string.find(cname, "TV"))
+		if isNoise or (Entities and Entities[cname]) then
+			task.spawn(Functions.HandleEntitySpawn, child)
+		end
+	end
+
+	Connections.CameraEntityHandler = cam.ChildAdded:Connect(CheckCamEntity)
+	Connections.CameraDescendantHandler = cam.DescendantAdded:Connect(CheckCamEntity)
+
+	for _, child in ipairs(cam:GetDescendants()) do
+		CheckCamEntity(child)
+	end
+end
+
 Connections.EntityHandler = Services.Workspace.ChildAdded:Connect(HandleEntitySpawn)
 
 local liveEntities = Services.Workspace:FindFirstChild("LiveEntities")
@@ -8351,9 +8919,53 @@ if liveEntities then
 	Connections.LiveEntitiesHandler = liveEntities.ChildAdded:Connect(HandleEntitySpawn)
 end
 
+-- Подключение обработки TV_Stand и сущностей в Misc
+local function HookMiscFolder(folder)
+	if not folder then return end
+	if Connections.MiscEntityHandler then
+		Connections.MiscEntityHandler:Disconnect()
+		Connections.MiscEntityHandler = nil
+	end
+	local function CheckMiscEntity(child)
+		if not child or not child.Parent then return end
+		local cname = child.Name
+		if cname == "TV_Stand" or cname == "Noise_TV" or cname == "NoiseTV" or (Entities and Entities[cname]) then
+			task.spawn(Functions.HandleEntitySpawn, child)
+		end
+	end
+	Connections.MiscEntityHandler = folder.ChildAdded:Connect(CheckMiscEntity)
+	for _, child in ipairs(folder:GetChildren()) do
+		CheckMiscEntity(child)
+	end
+end
+
+local miscFolder = Services.Workspace:FindFirstChild("Misc")
+if miscFolder then
+	HookMiscFolder(miscFolder)
+end
+Services.Workspace.ChildAdded:Connect(function(child)
+	if child.Name == "Misc" then
+		HookMiscFolder(child)
+	end
+end)
+
+-- Подключение обработки сущностей в Camera
+if Services.Workspace.CurrentCamera then
+	Functions.HookCamera(Services.Workspace.CurrentCamera)
+elseif Camera then
+	Functions.HookCamera(Camera)
+end
+
+Connections.CurrentCameraChanged = Services.Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	if Services.Workspace.CurrentCamera then
+		Camera = Services.Workspace.CurrentCamera
+		Functions.HookCamera(Camera)
+	end
+end)
+
 -- Проверка уже заспавненных сущностей при запуске скрипта
 for _, Obj in ipairs(Services.Workspace:GetDescendants()) do
-	if Obj:IsA("Model") and Entities[Obj.Name] then
+	if Obj.Name == "TV_Stand" or Obj.Name == "Noise_TV" or Obj.Name == "NoiseModel" or Obj.Name == "Noise" or (Obj:IsA("Model") and Entities[Obj.Name]) then
 		task.spawn(HandleEntitySpawn, Obj)
 	end
 end
@@ -8370,6 +8982,9 @@ Connections.Cleaner = Services.RunService.Heartbeat:Connect(function()
 			-- Object.Parent == nil работает в разы быстрее, чем IsDescendantOf
 			if not Object or Object.Parent == nil then
 				table.remove(Array, I)
+				if Abysall and Abysall.ESPLibrary then
+					Abysall.ESPLibrary:RemoveESP(Object)
+				end
 				local Conn = ESPConnections[Object]
 				if Conn then
 					Conn:Disconnect()
@@ -8386,7 +9001,7 @@ Connections.PromptFixer = Services.RunService.Heartbeat:Connect(function()
 	if tick() - LastPromptFix <= 0.5 then return end
 	LastPromptFix = tick()
 	for _, Prompt in Objects.Prompts do
-		if Prompt:HasTag("DisableWhenEnabledOnClient") then
+		if Prompt and Prompt.Parent and Prompt:HasTag("DisableWhenEnabledOnClient") then
 			Prompt:RemoveTag("DisableWhenEnabledOnClient")
 		end
 	end
