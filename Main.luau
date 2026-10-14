@@ -224,6 +224,13 @@ getgenv().Abysall = {
 
 local Abysall = getgenv().Abysall
 
+if not Abysall.Environment.identifyexecutor then
+    Abysall.Environment.identifyexecutor = function()
+        local name = (identifyexecutor and identifyexecutor()) or (getexecutorname and getexecutorname()) or "Executor"
+        return name, "1.0"
+    end
+end
+
 local function CloneReference(Object)
     if Abysall and Abysall.Environment.cloneref then
         return Abysall.Environment.cloneref(Object)
@@ -348,6 +355,11 @@ local Services = setmetatable({}, {
 		return CloneReference(game:GetService(Name))
 	end
 })
+
+if Services.UserInputService.TouchEnabled and not Services.UserInputService.KeyboardEnabled then
+	Library.IsMobile = true
+	Library.OriginalMinSize = Vector2.new(480, 240)
+end
 
 
 
@@ -1529,6 +1541,13 @@ local Tabs = {
 	Archives = Window:AddTab("New - Archives", "rbxassetid://104508835882225"),
 	Stairwell = Window:AddTab("New - Stairwell", "rbxassetid://80017304328364"),
 }
+
+task.spawn(function()
+	task.wait(0.15)
+	if Tabs and Tabs.General and Tabs.General.Show then
+		Tabs.General:Show()
+	end
+end)
 
 
 Groupboxes.General_Character = Tabs.General:AddLeftGroupbox("Character")
@@ -5047,10 +5066,86 @@ Groupboxes.Exploits_BypassRight:AddToggle("PositionSpoof", {
 	Text = "Position Spoof", Default = false,
 	Tooltip = "Makes your character appear underground on the server, protecting you from rush-like entities."
 })
+Groupboxes.Exploits_BypassRight:AddToggle("AutoPositionSpoof", {
+	Text = "Auto Position Spoof", Default = false,
+	Tooltip = "Automatically enables Position Spoof when rush-like entities appear, and disables it when they leave."
+})
 Groupboxes.Exploits_BypassRight:AddToggle("CrouchSpoof", {
 	Text = "Crouch Spoof", Default = false, Tooltip = "Makes the game think you are always crouching."
 })
+
+Globals.AutoSpoofed = false
+Globals.LastMonsterAround = false
+
+Toggles.AutoPositionSpoof:OnChanged(function(Value)
+	if not Value then
+		Globals.LastMonsterAround = false
+		if Globals.AutoSpoofed then
+			Globals.AutoSpoofed = false
+			if Toggles.PositionSpoof.Value then
+				Toggles.PositionSpoof:SetValue(false)
+			end
+		end
+	end
+end)
+
+local SpoofMonstersList = {
+	["RushMoving"]     = true,
+	["AmbushMoving"]   = true,
+	["BackdoorRush"]   = true,
+	["A60"]            = true,
+	["A120"]           = true,
+	["GlitchRush"]     = true,
+	["GlitchAmbush"]   = true,
+	["BashMoving"]     = true,
+	["DronesStampede"] = true,
+	["Scribbles"]      = true,
+	["CustomEntity"]   = true,
+	["FrozenAmbush"]   = true,
+}
+
+local lastMonsterCheck = 0
+local cachedMonsterAround = false
+
+local function IsSpoofMonsterAround()
+	local now = tick()
+	if now - lastMonsterCheck < 0.15 then
+		return cachedMonsterAround
+	end
+	lastMonsterCheck = now
+
+	for _, child in ipairs(Services.Workspace:GetChildren()) do
+		if SpoofMonstersList[child.Name] then
+			cachedMonsterAround = true
+			return true
+		end
+	end
+	local liveEnts = Services.Workspace:FindFirstChild("LiveEntities")
+	if liveEnts then
+		for _, child in ipairs(liveEnts:GetChildren()) do
+			if SpoofMonstersList[child.Name] then
+				cachedMonsterAround = true
+				return true
+			end
+		end
+	end
+	if Objects and Objects.Entities then
+		for _, entity in ipairs(Objects.Entities) do
+			if entity and entity.Parent and SpoofMonstersList[entity.Name] then
+				cachedMonsterAround = true
+				return true
+			end
+		end
+	end
+
+	cachedMonsterAround = false
+	return false
+end
+
 Toggles.PositionSpoof:OnChanged(function(Value)
+	if not Value then
+		Globals.AutoSpoofed = false
+	end
 	if Floor ~= "Fools" and Floor ~= "OldHotel" then
 		if Value then
 			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
@@ -7214,6 +7309,26 @@ Functions.HandleCharacter = function(NewCharacter)
 			end
 		end
 
+
+		-- Auto Position Spoof (включает Position Spoof только при появлении раша/амбуша и выключает когда они ушли)
+		if Toggles.AutoPositionSpoof and Toggles.AutoPositionSpoof.Value then
+			local monsterAround = IsSpoofMonsterAround()
+			if monsterAround and not Globals.LastMonsterAround then
+				Globals.LastMonsterAround = true
+				Globals.AutoSpoofed = true
+				if not Toggles.PositionSpoof.Value then
+					Toggles.PositionSpoof:SetValue(true)
+				end
+			elseif not monsterAround and Globals.LastMonsterAround then
+				Globals.LastMonsterAround = false
+				if Globals.AutoSpoofed and Toggles.PositionSpoof.Value then
+					Toggles.PositionSpoof:SetValue(false)
+				end
+				Globals.AutoSpoofed = false
+			end
+		else
+			Globals.LastMonsterAround = false
+		end
 
 		if (Toggles.CrouchSpoof.Value or Toggles.PositionSpoof.Value) and RemotesFolder:FindFirstChild("Crouch") then
 			RemotesFolder.Crouch:FireServer(true, true)
