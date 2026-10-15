@@ -1071,8 +1071,20 @@ FakeEvents.Surge.Name    = "SurgeRemote"
 if RemotesFolder then
 	FakeEvents.Screech_Real = RemotesFolder:WaitForChild("Screech", 3) or RemotesFolder:FindFirstChild("Screech")
 	FakeEvents.Shade_Real   = RemotesFolder:WaitForChild("ShadeResult", 3) or RemotesFolder:FindFirstChild("ShadeResult")
-	FakeEvents.A90_Real     = RemotesFolder:FindFirstChild("A90")
+	FakeEvents.A90_Real     = RemotesFolder:FindFirstChild("A90") or RemotesFolder:FindFirstChild("A-90")
 	FakeEvents.Surge_Real   = RemotesFolder:FindFirstChild("SurgeRemote")
+
+	RemotesFolder.ChildAdded:Connect(function(child)
+		if child.Name == "A90" or child.Name == "A-90" then
+			FakeEvents.A90_Real = child
+			if Functions and Functions.ApplyRemoveA90 and Toggles and Toggles.RemoveA90 and Toggles.RemoveA90.Value then
+				Functions.ApplyRemoveA90(true)
+			elseif Toggles and Toggles.NoA90Damage and Toggles.NoA90Damage.Value then
+				FakeEvents.A90.Parent = RemotesFolder
+				FakeEvents.A90_Real.Parent = nil
+			end
+		end
+	end)
 end
 
 if RemotesFolder:FindFirstChild("FootstepRemoteThatWeNeed") then
@@ -3810,6 +3822,12 @@ Groupboxes.Stairwell_Misc = Tabs.Stairwell:AddLeftGroupbox("Exploits / Anti / Mi
 
 Groupboxes.Stairwell_Misc:AddDivider()
 Groupboxes.Stairwell_Misc:AddToggle("BypassNoise", { Text = "Noise Tv Breaker", Default = false, Tooltip = "Breaks the tv of noise while holding it." })
+Groupboxes.Stairwell_Misc:AddDropdown("NoiseTvBreakerMethod", {
+	Text = "Breaker Method",
+	Values = { "Rotate & Lift", "Under Map" },
+	Default = 1,
+	Tooltip = "Choose how to break the TV: Rotate & Lift (Orientation 0, 180, 180) or Under Map (Y = -120)."
+})
 
 
 Groupboxes.Stairwell_Misc:AddToggle("DroppedItemValue", { Text = "Item Number", Default = false, Tooltip = "Shows the number of dropped items." })
@@ -4597,9 +4615,12 @@ local bypassNoisePromptTriggeredConnection = nil
 
 -- ==============================================================================
 -- НАСТРОЙКИ ДЛЯ NOISE TV BREAKER (ИЗМЕНЯЙТЕ ПАРАМЕТРЫ ЗДЕСЬ):
-local TV_BREAKER_OFFSET_Y = 5      -- Подъем телевизора вверх в студах (по умолчанию 5)
-local TV_BREAKER_ROTATION_Y = 180  -- Поворот вокруг оси Y в градусах (по умолчанию 180)
-local TV_BREAKER_VELOCITY_Y = 0    -- Дополнительная вертикальная скорость (0 = естественное падение)
+local TV_BREAKER_OFFSET_Y = 5       -- Подъем телевизора вверх в студах (для Rotate & Lift, по умолчанию 5)
+local TV_BREAKER_ROT_X = 0          -- Поворот вокруг оси X в градусах (как на фото: 0)
+local TV_BREAKER_ROT_Y = 180        -- Поворот вокруг оси Y в градусах (как на фото: 180)
+local TV_BREAKER_ROT_Z = 180        -- Поворот вокруг оси Z в градусах (как на фото: 180)
+local TV_BREAKER_UNDER_Y = -120     -- Позиция Y под картой (для Under Map, по умолчанию -120)
+local TV_BREAKER_VELOCITY_Y = 0     -- Дополнительная вертикальная скорость (0 = естественное падение)
 -- ==============================================================================
 
 local function IsConnectedToCharacter(instance, char)
@@ -4738,20 +4759,28 @@ local function BreakBypassNoiseTvStand(tvStand)
 		end
 	end
 
+	local method = (Options.NoiseTvBreakerMethod and Options.NoiseTvBreakerMethod.Value) or "Rotate & Lift"
+
 	-- 4. Снимаем Anchored со всех деталей телевизора
 	for _, part in ipairs(tvStand:GetDescendants()) do
 		if part:IsA("BasePart") then
 			pcall(function()
 				part.Anchored = false
-				part.CanCollide = true
+				part.CanCollide = (method ~= "Under Map")
 			end)
 		end
 	end
 
-	-- 5. Поднимаем ТВ вверх и разворачиваем по оси Y согласно настройкам
+	-- 5. Перемещение ТВ согласно выбранному методу
 	local ok, tvPivot = pcall(function() return tvStand:GetPivot() end)
 	if ok and tvPivot then
-		local newCFrame = (tvPivot + Vector3.new(0, TV_BREAKER_OFFSET_Y, 0)) * CFrame.Angles(0, math.rad(TV_BREAKER_ROTATION_Y), 0)
+		local newCFrame
+		if method == "Under Map" then
+			newCFrame = CFrame.new(tvPivot.Position.X, TV_BREAKER_UNDER_Y, tvPivot.Position.Z)
+		else
+			-- "Rotate & Lift" (поворот по фото: X=0, Y=180, Z=180 и подъем вверх на TV_BREAKER_OFFSET_Y студов)
+			newCFrame = (tvPivot + Vector3.new(0, TV_BREAKER_OFFSET_Y, 0)) * CFrame.Angles(math.rad(TV_BREAKER_ROT_X), math.rad(TV_BREAKER_ROT_Y), math.rad(TV_BREAKER_ROT_Z))
+		end
 
 		pcall(function()
 			tvStand:PivotTo(newCFrame)
@@ -5200,13 +5229,17 @@ Toggles.NoHaltDamage:OnChanged(function(Value)
 end)
 
 Toggles.NoA90Damage:OnChanged(function(Value)
-	if RemotesFolder:FindFirstChild("A90") then
+	local realRemote = FakeEvents.A90_Real or (RemotesFolder and (RemotesFolder:FindFirstChild("A90") or RemotesFolder:FindFirstChild("A-90")))
+	if realRemote then
+		FakeEvents.A90_Real = realRemote
 		if Value then
 			FakeEvents.A90.Parent = RemotesFolder
-			FakeEvents.A90_Real.Parent = nil
+			realRemote.Parent = nil
 		else
-			FakeEvents.A90_Real.Parent = RemotesFolder
-			FakeEvents.A90.Parent = nil
+			if not (Toggles.RemoveA90 and Toggles.RemoveA90.Value) then
+				realRemote.Parent = RemotesFolder
+				FakeEvents.A90.Parent = nil
+			end
 		end
 	end
 end)
@@ -5223,6 +5256,93 @@ Toggles.NoSurgeDamage:OnChanged(function(Value)
 end)
 
 local Modules = {}
+
+Functions.FindA90Module = function()
+	if Modules and Modules.A90 and Modules.A90.Parent then
+		return Modules.A90
+	end
+	local mainUI = Globals.MainUI or LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+	if mainUI then
+		local initiator = mainUI:FindFirstChild("Initiator")
+		local mainGame = initiator and initiator:FindFirstChild("Main_Game")
+		local remoteListener = mainGame and mainGame:FindFirstChild("RemoteListener")
+		local uiModules = remoteListener and remoteListener:FindFirstChild("Modules")
+		if uiModules then
+			local m = uiModules:FindFirstChild("A90") or uiModules:FindFirstChild("A-90") 
+				or uiModules:FindFirstChild("A90_Disabled") or uiModules:FindFirstChild("A-90_Disabled")
+			if m then return m end
+		end
+		for _, desc in ipairs(mainUI:GetDescendants()) do
+			if desc:IsA("ModuleScript") and (desc.Name == "A90" or desc.Name == "A-90" or desc.Name == "A90_Disabled" or desc.Name == "A-90_Disabled") then
+				return desc
+			end
+		end
+	end
+	if ClientModules then
+		for _, desc in ipairs(ClientModules:GetDescendants()) do
+			if desc:IsA("ModuleScript") and (desc.Name == "A90" or desc.Name == "A-90" or desc.Name == "A90_Disabled" or desc.Name == "A-90_Disabled") then
+				return desc
+			end
+		end
+	end
+	return nil
+end
+
+Functions.ApplyRemoveA90 = function(Value)
+	local a90Module = Functions.FindA90Module()
+	if a90Module then
+		Modules.A90 = a90Module
+		a90Module.Name = Value and "A90_Disabled" or "A90"
+	end
+
+	local realRemote = FakeEvents.A90_Real or (RemotesFolder and (RemotesFolder:FindFirstChild("A90") or RemotesFolder:FindFirstChild("A-90")))
+	if realRemote then
+		FakeEvents.A90_Real = realRemote
+		if Abysall and Abysall.Environment and Abysall.Environment.getconnections then
+			pcall(function()
+				local conns = Abysall.Environment.getconnections(realRemote.OnClientEvent)
+				if conns then
+					for _, conn in ipairs(conns) do
+						if Value then
+							conn:Disable()
+						else
+							conn:Enable()
+						end
+					end
+				end
+			end)
+		end
+		if RemotesFolder then
+			if Value then
+				FakeEvents.A90.Parent = RemotesFolder
+				realRemote.Parent = nil
+			else
+				if not (Toggles.NoA90Damage and Toggles.NoA90Damage.Value) then
+					realRemote.Parent = RemotesFolder
+					FakeEvents.A90.Parent = nil
+				end
+			end
+		end
+	end
+
+	if Value then
+		local mainUI = Globals.MainUI or LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+		if mainUI then
+			for _, obj in ipairs(mainUI:GetDescendants()) do
+				if obj:IsA("GuiObject") and (obj.Name == "A90" or obj.Name == "A-90" or obj.Name == "A90Frame" or obj.Name == "A90Visual" or string.find(string.lower(obj.Name), "a90") ~= nil) then
+					obj.Visible = false
+					obj:Destroy()
+				end
+			end
+		end
+		for _, s in ipairs(Services.SoundService:GetDescendants()) do
+			if s:IsA("Sound") and (s.Name == "A90" or s.Name == "A-90" or string.find(string.lower(s.Name), "a90") ~= nil) then
+				s.Volume = 0
+				s:Stop()
+			end
+		end
+	end
+end
 
 Toggles.RemoveScreech:OnChanged(function(Value)
 	if Value then
@@ -5249,8 +5369,49 @@ Toggles.RemoveHalt:OnChanged(function(Value)
 	end
 end)
 Toggles.RemoveA90:OnChanged(function(Value)
-	if Modules.A90 then
-		Modules.A90.Name = Value and "A90_Disabled" or "A90"
+	Functions.ApplyRemoveA90(Value)
+	if Value then
+		task.spawn(function()
+			while Toggles.RemoveA90.Value do
+				local a90Module = Functions.FindA90Module()
+				if a90Module and a90Module.Name ~= "A90_Disabled" then
+					a90Module.Name = "A90_Disabled"
+				end
+
+				local realRemote = FakeEvents.A90_Real or (RemotesFolder and (RemotesFolder:FindFirstChild("A90") or RemotesFolder:FindFirstChild("A-90")))
+				if realRemote then
+					FakeEvents.A90_Real = realRemote
+					if Abysall and Abysall.Environment and Abysall.Environment.getconnections then
+						pcall(function()
+							for _, conn in ipairs(Abysall.Environment.getconnections(realRemote.OnClientEvent)) do
+								conn:Disable()
+							end
+						end)
+					end
+				end
+
+				local mainUI = Globals.MainUI or LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+				if mainUI then
+					for _, obj in ipairs(mainUI:GetChildren()) do
+						if obj:IsA("GuiObject") and (obj.Name == "A90" or obj.Name == "A-90" or string.find(string.lower(obj.Name), "a90") ~= nil) then
+							obj.Visible = false
+							obj:Destroy()
+						end
+					end
+					local mf = mainUI:FindFirstChild("MainFrame")
+					if mf then
+						for _, obj in ipairs(mf:GetChildren()) do
+							if obj:IsA("GuiObject") and (obj.Name == "A90" or obj.Name == "A-90" or string.find(string.lower(obj.Name), "a90") ~= nil) then
+								obj.Visible = false
+								obj:Destroy()
+							end
+						end
+					end
+				end
+
+				task.wait(0.2)
+			end
+		end)
 	end
 end)
 Toggles.RemoveDread:OnChanged(function(Value)
@@ -6808,6 +6969,53 @@ Connections.TextBoxConnection2 = Services.UserInputService.TextBoxFocusReleased:
 	Globals.IsTyping = false
 end)
 
+Functions.IsValidEyes = function(model)
+	if not model or typeof(model) ~= "Instance" or not model.Parent then return false end
+	if not model:IsA("Model") then return false end
+
+	local name = model.Name
+	if name ~= "Eyes" and name ~= "Lookman" and name ~= "BackdoorLookman" then return false end
+
+	-- Исключаем предметы и тулы (в руках игрока, лежащие или в инвентаре)
+	if model:IsA("Tool") or model:FindFirstAncestorWhichIsA("Tool") then
+		return false
+	end
+
+	-- Исключаем аксессуары и головные уборы аватаров
+	if model:IsA("Accessory") or model:FindFirstAncestorWhichIsA("Accessory")
+		or model:IsA("Accoutrement") or model:FindFirstAncestorWhichIsA("Accoutrement") then
+		return false
+	end
+
+	-- Исключаем вьюмоделы первого лица в камере (в Camera Eyes никогда не спавнится)
+	local currentCam = Services.Workspace.CurrentCamera or Camera or Services.Workspace:FindFirstChild("Camera")
+	if currentCam and model:IsDescendantOf(currentCam) then
+		return false
+	end
+
+	-- Исключаем любые части и модели, прикрепленные к персонажу любого игрока
+	for _, player in ipairs(Services.Players:GetPlayers()) do
+		local char = player.Character
+		if char and (model == char or model:IsDescendantOf(char)) then
+			return false
+		end
+	end
+
+	-- Исключаем мух, мошек, Gloombats и любые стаи насекомых
+	local cur = model.Parent
+	while cur and cur ~= Services.Workspace and cur ~= game do
+		local cname = string.lower(cur.Name)
+		if string.find(cname, "fly") or string.find(cname, "flies") or string.find(cname, "swarm")
+			or string.find(cname, "gloombat") or string.find(cname, "gloom") or string.find(cname, "bat")
+			or string.find(cname, "bug") or string.find(cname, "insect") then
+			return false
+		end
+		cur = cur.Parent
+	end
+
+	return true
+end
+
 Functions.HandleCharacter = function(NewCharacter)
 	for _, Key in CharacterOldConnectionKeys do
 		if Connections[Key] then
@@ -6906,13 +7114,13 @@ Functions.HandleCharacter = function(NewCharacter)
 	Globals.AnticheatDisabled = false
 
 	local UIModules = Globals.MainUI.Initiator.Main_Game.RemoteListener.Modules
-	Modules.A90             = UIModules:FindFirstChild("A90")
+	Modules.A90             = UIModules:FindFirstChild("A90") or UIModules:FindFirstChild("A-90") or (Functions.FindA90Module and Functions.FindA90Module())
 	Modules.Screech         = UIModules.Screech
 	Modules.Dread           = UIModules:FindFirstChild("Dread")
 	Modules.SpiderJumpscare = UIModules.SpiderJumpscare
 
 	if Toggles.RemoveScreech.Value    then Modules.Screech.Name = "Screech_Disabled" print ("screech gone") end
-	if Toggles.RemoveA90.Value and Modules.A90   then Modules.A90.Name = "A90_Disabled" end
+	if Toggles.RemoveA90.Value and Functions.ApplyRemoveA90 then Functions.ApplyRemoveA90(true) end
 	if Toggles.RemoveDread.Value and Modules.Dread then Modules.Dread.Name = "Dread_Disabled" end
 	if Toggles.DisableTimothyJumpscare.Value then Modules.SpiderJumpscare.Name = "SpiderJumpscare_Disabled" end
 
@@ -7277,8 +7485,54 @@ Functions.HandleCharacter = function(NewCharacter)
 			CollisionPartClone.Massless = true
 		end
 
-		Globals.IsEyes    = Services.Workspace:FindFirstChild("Eyes") ~= nil or Services.Workspace:FindFirstChild("Lookman") ~= nil
-		Globals.IsLookman = Services.Workspace:FindFirstChild("BackdoorLookman") ~= nil
+		local hasEyes = false
+		local wsEyes = Services.Workspace:FindFirstChild("Eyes") or Services.Workspace:FindFirstChild("Lookman")
+		if wsEyes and Functions.IsValidEyes(wsEyes) then
+			hasEyes = true
+		end
+		if not hasEyes then
+			local live = Services.Workspace:FindFirstChild("LiveEntities")
+			if live then
+				local liveEyes = live:FindFirstChild("Eyes") or live:FindFirstChild("Lookman")
+				if liveEyes and Functions.IsValidEyes(liveEyes) then
+					hasEyes = true
+				end
+			end
+		end
+		if not hasEyes then
+			for _, ent in ipairs(Objects.Entities) do
+				if ent and ent.Parent and (ent.Name == "Eyes" or ent.Name == "Lookman") and Functions.IsValidEyes(ent) then
+					hasEyes = true
+					break
+				end
+			end
+		end
+
+		local hasLookman = false
+		local wsLookman = Services.Workspace:FindFirstChild("BackdoorLookman")
+		if wsLookman and Functions.IsValidEyes(wsLookman) then
+			hasLookman = true
+		end
+		if not hasLookman then
+			local live = Services.Workspace:FindFirstChild("LiveEntities")
+			if live then
+				local liveLookman = live:FindFirstChild("BackdoorLookman")
+				if liveLookman and Functions.IsValidEyes(liveLookman) then
+					hasLookman = true
+				end
+			end
+		end
+		if not hasLookman then
+			for _, ent in ipairs(Objects.Entities) do
+				if ent and ent.Parent and ent.Name == "BackdoorLookman" and Functions.IsValidEyes(ent) then
+					hasLookman = true
+					break
+				end
+			end
+		end
+
+		Globals.IsEyes    = hasEyes
+		Globals.IsLookman = hasLookman
 
 		if Toggles.AmbientToggle.Value and Services.Lighting.Ambient ~= Options.AmbientColor.Value then
 			Services.Lighting.Ambient = Options.AmbientColor.Value
@@ -7723,11 +7977,52 @@ Functions.HandleObject = function(Object)
 		end)
 	elseif Name == "FuseObtain" then
 		if Toggles.ObjectiveESPToggle.Value then Functions.AddESP({ Object = Object, Text = "Generator Fuse", Color = Options.ObjectiveESPColor.Value }, true) end
-		Object:WaitForChild("Hitbox").FuseModel:GetPropertyChangedSignal("LocalTransparencyModifier"):Once(function()
-			Functions.RemoveESP(Object)
-			Functions.BlacklistESP(Object)
-		end)
 		table.insert(Objects.Objectives, Object)
+		task.spawn(function()
+			local cleaned = false
+			local function cleanup()
+				if cleaned then return end
+				cleaned = true
+				Functions.RemoveESP(Object)
+				Functions.BlacklistESP(Object)
+			end
+
+			local hitbox = Object:FindFirstChild("Hitbox") or Object:WaitForChild("Hitbox", 2)
+			local fuseModel = (hitbox and hitbox:FindFirstChild("FuseModel"))
+				or Object:FindFirstChild("FuseModel")
+				or Object:FindFirstChild("FuseModel", true)
+				or (hitbox and hitbox:WaitForChild("FuseModel", 2))
+				or Object:WaitForChild("FuseModel", 2)
+
+			if fuseModel then
+				if fuseModel:IsA("BasePart") then
+					fuseModel:GetPropertyChangedSignal("LocalTransparencyModifier"):Once(cleanup)
+				else
+					local targetPart = fuseModel:FindFirstChildWhichIsA("BasePart", true)
+					if targetPart then
+						targetPart:GetPropertyChangedSignal("LocalTransparencyModifier"):Once(cleanup)
+					end
+				end
+				fuseModel.AncestryChanged:Once(function(_, parent)
+					if not parent or not parent:IsDescendantOf(Services.Workspace) then
+						cleanup()
+					end
+				end)
+			end
+
+			if hitbox then
+				local prompt = hitbox:FindFirstChildWhichIsA("ProximityPrompt", true)
+				if prompt then
+					prompt.Triggered:Once(cleanup)
+				end
+			end
+
+			Object.AncestryChanged:Once(function(_, parent)
+				if not parent or not parent:IsDescendantOf(Services.Workspace) then
+					cleanup()
+				end
+			end)
+		end)
 	elseif Name == "MinesGateButton" then
 		if Toggles.ObjectiveESPToggle.Value then Functions.AddESP({ Object = Object, Text = "Gate Button", Color = Options.ObjectiveESPColor.Value }, true) end
 		Object.Parent:WaitForChild("MinesGate").Main.SoundOpen.Played:Once(function()
@@ -8379,7 +8674,7 @@ Connections.QueueConnection = Services.RunService.Heartbeat:Connect(function()
 		local Object = table.remove(Globals.ObjectQueue)
 		if not Object then break end
 		if Object.Parent then
-			Functions.HandleObject(Object)
+			pcall(Functions.HandleObject, Object)
 		end
 	end
 end)
@@ -8402,9 +8697,23 @@ Connections.InstanceHandler = Services.Workspace.DescendantAdded:Connect(functio
 	local isNoise = not isTV and (name == "Noise" or name == "NoiseModel" or (typeof(name) == "string" and string.find(name, "Noise") ~= nil and not string.find(name, "TV")))
 
 	if isTV or isNoise or Entities[name] then
-		local isInsideTV = not isTV and (Object:FindFirstAncestor("TV_Stand") or Object:FindFirstAncestor("Noise_TV"))
-		if not isInsideTV and Functions.HandleEntitySpawn then
-			task.spawn(Functions.HandleEntitySpawn, Object)
+		-- Игнорируем предметы в руках, аксессуары и вьюмоделы в камере
+		local isToolOrAcc = Object:FindFirstAncestorWhichIsA("Tool") or Object:FindFirstAncestorWhichIsA("Accessory") or Object:FindFirstAncestorWhichIsA("Accoutrement")
+		if not isToolOrAcc then
+			local activeCam = Services.Workspace.CurrentCamera or Camera
+			local inCam = activeCam and Object:IsDescendantOf(activeCam)
+			if not inCam or isNoise then
+				if name == "Eyes" or name == "Lookman" or name == "BackdoorLookman" then
+					if Object:IsA("Model") and Functions.IsValidEyes(Object) then
+						task.spawn(Functions.HandleEntitySpawn, Object)
+					end
+				else
+					local isInsideTV = not isTV and (Object:FindFirstAncestor("TV_Stand") or Object:FindFirstAncestor("Noise_TV"))
+					if not isInsideTV and Functions.HandleEntitySpawn then
+						task.spawn(Functions.HandleEntitySpawn, Object)
+					end
+				end
+			end
 		end
 	end
 	if IgnoredClasses[Object.ClassName] then return end
@@ -8822,6 +9131,47 @@ Functions.HandleEntitySpawn = function(Entity)
 	end
 	if not Model or (not Model:IsA("Model") and not Model:IsA("Folder") and not Model:IsA("BasePart")) then return end
 
+	-- Исключаем любые предметы в руках, тулы и аксессуары
+	if Model:FindFirstAncestorWhichIsA("Tool") or Model:IsA("Tool") then return end
+	if Model:FindFirstAncestorWhichIsA("Accessory") or Model:IsA("Accessory")
+		or Model:FindFirstAncestorWhichIsA("Accoutrement") or Model:IsA("Accoutrement") then return end
+
+	-- Исключаем любые части персонажей игроков
+	for _, p in ipairs(Services.Players:GetPlayers()) do
+		local ch = p.Character
+		if ch and (Model == ch or Model:IsDescendantOf(ch)) then
+			return
+		end
+	end
+
+	-- В камере разрешен только Noise
+	local camCheck = Services.Workspace.CurrentCamera or Camera or Services.Workspace:FindFirstChild("Camera")
+	local isNoiseCheck = (Model.Name == "Noise" or Model.Name == "NoiseModel" or (typeof(Model.Name) == "string" and string.find(Model.Name, "Noise") ~= nil and not string.find(Model.Name, "TV")))
+	if camCheck and Model:IsDescendantOf(camCheck) and not isNoiseCheck then
+		return
+	end
+
+	-- Исключаем мух, мошек и части Gloombats
+	local cur = Model.Parent
+	while cur and cur ~= Services.Workspace and cur ~= game do
+		local cname = string.lower(cur.Name)
+		if string.find(cname, "fly") or string.find(cname, "flies") or string.find(cname, "swarm")
+			or string.find(cname, "gloombat") or string.find(cname, "gloom") or string.find(cname, "bat")
+			or string.find(cname, "bug") or string.find(cname, "insect") then
+			if Model.Name ~= "GloombatSwarm" then
+				return
+			end
+		end
+		cur = cur.Parent
+	end
+
+	-- Для Eyes и Lookman: обязательная строгая валидация (только настоящая модель монстра)
+	if (Model.Name == "Eyes" or Model.Name == "Lookman" or Model.Name == "BackdoorLookman") then
+		if not Functions.IsValidEyes(Model) then
+			return
+		end
+	end
+
 	-- Если объект находится внутри TV_Stand (или сам является TV_Stand), находим корневой TV_Stand
 	local topTV = nil
 	if Model.Name == "TV_Stand" or Model.Name == "Noise_TV" or Model.Name == "NoiseTV" then
@@ -9014,7 +9364,7 @@ Functions.HookCamera = function(cam)
 		if not child or not child.Parent then return end
 		local cname = child.Name
 		local isNoise = cname == "Noise" or cname == "NoiseModel" or (typeof(cname) == "string" and string.find(cname, "Noise") ~= nil and not string.find(cname, "TV"))
-		if isNoise or (Entities and Entities[cname]) then
+		if isNoise then
 			task.spawn(Functions.HandleEntitySpawn, child)
 		end
 	end
@@ -9081,7 +9431,13 @@ end)
 -- Проверка уже заспавненных сущностей при запуске скрипта
 for _, Obj in ipairs(Services.Workspace:GetDescendants()) do
 	if Obj.Name == "TV_Stand" or Obj.Name == "Noise_TV" or Obj.Name == "NoiseModel" or Obj.Name == "Noise" or (Obj:IsA("Model") and Entities[Obj.Name]) then
-		task.spawn(HandleEntitySpawn, Obj)
+		if Obj.Name == "Eyes" or Obj.Name == "Lookman" or Obj.Name == "BackdoorLookman" then
+			if Functions.IsValidEyes(Obj) then
+				task.spawn(HandleEntitySpawn, Obj)
+			end
+		else
+			task.spawn(HandleEntitySpawn, Obj)
+		end
 	end
 end
 
