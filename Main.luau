@@ -4230,6 +4230,165 @@ end)
 
 local StairwellLandingToken = 0
 
+local function StairwellSnapshotTools()
+	local set = {}
+	local char = LocalPlayer and LocalPlayer.Character
+	local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+	if char then
+		for _, item in ipairs(char:GetChildren()) do
+			if item:IsA("Tool") then
+				set[item] = true
+			end
+		end
+	end
+	if backpack then
+		for _, item in ipairs(backpack:GetChildren()) do
+			if item:IsA("Tool") then
+				set[item] = true
+			end
+		end
+	end
+	return set
+end
+
+local function StairwellDropTrashTools(previousToolSet)
+	local remotes = Services.ReplicatedStorage:FindFirstChild("RemotesFolder") or RemotesFolder
+	local dropRemote = remotes and remotes:FindFirstChild("DropItem")
+	local char = LocalPlayer and LocalPlayer.Character
+	local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+
+	local valuableItems = {
+		["Crucifix"] = true,
+		["CrucifixWall"] = true,
+		["SkeletonKey"] = true,
+		["Shears"] = true,
+		["Lockpick"] = true,
+		["Flashlight"] = true,
+		["Shakelight"] = true,
+		["Straplight"] = true,
+		["Bulklight"] = true,
+		["Scanner"] = true,
+		["LaserPointer"] = true,
+		["HolyGrenade"] = true,
+		["GoldGun"] = true,
+		["SnakeBox"] = true,
+		["Multitool"] = true,
+		["Compass"] = true,
+		["Lantern"] = true,
+		["LanternLitItem"] = true,
+	}
+
+	local function DropIfEligible(tool)
+		if not tool or not tool:IsA("Tool") then return end
+		if valuableItems[tool.Name] then return end
+
+		-- If tool is newly acquired from trash or is a junk item, drop it
+		if not previousToolSet or not previousToolSet[tool] then
+			if dropRemote then
+				pcall(function()
+					dropRemote:FireServer(tool)
+				end)
+			end
+		end
+	end
+
+	if char then
+		for _, item in ipairs(char:GetChildren()) do
+			DropIfEligible(item)
+		end
+	end
+	if backpack then
+		for _, item in ipairs(backpack:GetChildren()) do
+			DropIfEligible(item)
+		end
+	end
+
+	-- Safe keyboard drop fallback for PC ONLY (Never call on Mobile to prevent native SIGSEGV crashes)
+	local isMobileDevice = Library.IsMobile or (Services.UserInputService.TouchEnabled and not Services.UserInputService.KeyboardEnabled)
+	if not isMobileDevice then
+		pcall(function()
+			local vim = game:GetService("VirtualInputManager")
+			if vim then
+				vim:SendKeyEvent(true, Enum.KeyCode.X, false, game)
+				task.wait(0.02)
+				vim:SendKeyEvent(false, Enum.KeyCode.X, false, game)
+			elseif keypress and keyrelease then
+				keypress(0x58)
+				task.wait(0.02)
+				keyrelease(0x58)
+			end
+		end)
+	end
+end
+
+local function CollectStairwellTrashTargets()
+	local currentRooms = workspace:FindFirstChild("CurrentRooms")
+	if not currentRooms then return {} end
+
+	local targets = {}
+	local seenModels = {}
+
+	for _, room in ipairs(currentRooms:GetChildren()) do
+		local roomNum = tonumber(room.Name) or math.huge
+
+		-- 1. Check StairwellLandingLogic
+		local landingLogic = room:FindFirstChild("StairwellLandingLogic")
+		if landingLogic then
+			for _, obj in ipairs(landingLogic:GetChildren()) do
+				local prompts = {}
+				for _, desc in ipairs(obj:GetDescendants()) do
+					if desc:IsA("ProximityPrompt") and desc.Enabled and desc.Parent then
+						table.insert(prompts, desc)
+					end
+				end
+				if obj:IsA("ProximityPrompt") and obj.Enabled and obj.Parent then
+					table.insert(prompts, obj)
+				end
+
+				if #prompts > 0 and not seenModels[obj] then
+					seenModels[obj] = true
+					table.insert(targets, {
+						Model = obj,
+						Prompts = prompts,
+						RoomNum = roomNum,
+					})
+				end
+			end
+		end
+
+		-- 2. Check Assets for Trashcan / Trash prompts
+		local assets = room:FindFirstChild("Assets")
+		if assets then
+			for _, obj in ipairs(assets:GetChildren()) do
+				local oName = obj.Name:lower()
+				local prompts = {}
+				for _, desc in ipairs(obj:GetDescendants()) do
+					if desc:IsA("ProximityPrompt") and desc.Enabled and desc.Parent then
+						local pName = desc.Name:lower()
+						if oName:find("trash") or pName:find("trash") or pName == "trashcanprompt" then
+							table.insert(prompts, desc)
+						end
+					end
+				end
+				if #prompts > 0 and not seenModels[obj] then
+					seenModels[obj] = true
+					table.insert(targets, {
+						Model = obj,
+						Prompts = prompts,
+						RoomNum = roomNum,
+					})
+				end
+			end
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		return a.RoomNum < b.RoomNum
+	end)
+
+	return targets
+end
+
 Toggles.StairwellLandingSpam:OnChanged(function(Value)
 	StairwellLandingToken += 1
 
@@ -4240,91 +4399,111 @@ Toggles.StairwellLandingSpam:OnChanged(function(Value)
 	local CurrentToken = StairwellLandingToken
 
 	task.spawn(function()
-		local CurrentRooms = workspace.CurrentRooms
-		local LocalPlayer = Services.Players.LocalPlayer
-
 		while Toggles.StairwellLandingSpam.Value and CurrentToken == StairwellLandingToken do
-			local StairwellModels = {}
+			local targets = CollectStairwellTrashTargets()
 
-			for _, Room in ipairs(CurrentRooms:GetChildren()) do
-				local StairwellLandingLogic = Room:FindFirstChild("StairwellLandingLogic")
+			if #targets == 0 then
+				task.wait(0.5)
+			else
+				for _, target in ipairs(targets) do
+					if not Toggles.StairwellLandingSpam.Value or CurrentToken ~= StairwellLandingToken then
+						break
+					end
 
-				if StairwellLandingLogic then
-					for _, Model in ipairs(StairwellLandingLogic:GetChildren()) do
-						if Model:IsA("Model") then
-							local Prompts = {}
+					local model = target.Model
+					if not model.Parent or not model:IsDescendantOf(workspace) then
+						continue
+					end
 
-							for _, Object in ipairs(Model:GetDescendants()) do
-								if Object:IsA("ProximityPrompt") then
-									Prompts[#Prompts + 1] = Object
+					local part = nil
+					if model:IsA("BasePart") then
+						part = model
+					elseif model:IsA("Model") then
+						part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+					end
+					if not part then
+						for _, p in ipairs(target.Prompts) do
+							if p.Parent and p.Parent:IsA("BasePart") then
+								part = p.Parent
+								break
+							end
+						end
+					end
+
+					if not part then
+						continue
+					end
+
+					local beforeTools = StairwellSnapshotTools()
+					local startTime = tick()
+
+					-- Keep player at the target item until it is picked up or timeout (2.0s max)
+					while Toggles.StairwellLandingSpam.Value
+						and CurrentToken == StairwellLandingToken
+						and model.Parent
+						and model:IsDescendantOf(workspace)
+						and (tick() - startTime < 2.0) do
+
+						local char = LocalPlayer and LocalPlayer.Character
+						local hum = char and char:FindFirstChildOfClass("Humanoid")
+						local hrp = char and char:FindFirstChild("HumanoidRootPart")
+						if not hrp or not hum or hum.Health <= 0 then
+							break
+						end
+
+						-- Keep player glued right at the item so server registers proximity
+						hrp.AssemblyLinearVelocity = Vector3.zero
+						hrp.CFrame = CFrame.new(part.Position + Vector3.new(0, 1.5, 0))
+
+						local anyPromptActive = false
+						for _, prompt in ipairs(target.Prompts) do
+							if prompt and prompt.Parent and prompt.Enabled then
+								anyPromptActive = true
+								prompt.RequiresLineOfSight = false
+								prompt.HoldDuration = 0
+								prompt.MaxActivationDistance = 99999
+
+								if fireproximityprompt then
+									pcall(fireproximityprompt, prompt)
+								elseif Functions.FirePrompt then
+									pcall(Functions.FirePrompt, prompt)
 								end
 							end
-
-							if #Prompts > 0 then
-								StairwellModels[#StairwellModels + 1] = {
-									Model = Model,
-									Prompts = Prompts,
-								}
-							end
 						end
-					end
-				end
-			end
 
-			table.sort(StairwellModels, function(First, Second)
-				local FirstRoom = First.Model.Parent and First.Model.Parent.Parent
-				local SecondRoom = Second.Model.Parent and Second.Model.Parent.Parent
+						-- If all prompts are gone or disabled, the item is taken!
+						if not anyPromptActive then
+							break
+						end
 
-				return (tonumber(FirstRoom and FirstRoom.Name) or math.huge) <
-					(tonumber(SecondRoom and SecondRoom.Name) or math.huge)
-			end)
-
-			for _, Data in ipairs(StairwellModels) do
-				if not Toggles.StairwellLandingSpam.Value or CurrentToken ~= StairwellLandingToken then
-					break
-				end
-
-				local Model = Data.Model
-
-				while Model.Parent
-					and Model:IsDescendantOf(workspace)
-					and Toggles.StairwellLandingSpam.Value
-					and CurrentToken == StairwellLandingToken do
-
-					local Character = LocalPlayer.Character
-					local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-
-					if HumanoidRootPart then
-						HumanoidRootPart.CFrame = Model:GetPivot() + Vector3.new(0, 5, 0)
-
-						for Index = 1, #Data.Prompts do
-							local Prompt = Data.Prompts[Index]
-
-							if Prompt.Parent and Prompt.Enabled and fireproximityprompt then
-								fireproximityprompt(Prompt)
+						-- Check if any tool was picked up into character or backpack
+						local currentTools = StairwellSnapshotTools()
+						local gotTool = false
+						for t in pairs(currentTools) do
+							if not beforeTools[t] then
+								gotTool = true
+								break
 							end
 						end
 
-						if keypress and keyrelease then
-							keypress(0x58)
-							task.wait(0.03)
-							keyrelease(0x58)
-						elseif Abysall
-							and Abysall.Environment
-							and Abysall.Environment.keypress
-							and Abysall.Environment.keyrelease then
-
-							Abysall.Environment.keypress(0x58)
-							task.wait(0.03)
-							Abysall.Environment.keyrelease(0x58)
+						if gotTool then
+							-- Drop the trash immediately while at the landing
+							StairwellDropTrashTools(beforeTools)
+							beforeTools = StairwellSnapshotTools()
+							task.wait(0.05)
+							break
 						end
+
+						Services.RunService.Heartbeat:Wait()
 					end
 
-					Services.RunService.Heartbeat:Wait()
+					-- Ensure any acquired trash is dropped before moving to next item
+					StairwellDropTrashTools(beforeTools)
+					task.wait(0.06)
+					StairwellDropTrashTools(beforeTools)
 				end
+				task.wait(0.2)
 			end
-
-			Services.RunService.Heartbeat:Wait()
 		end
 	end)
 end)
