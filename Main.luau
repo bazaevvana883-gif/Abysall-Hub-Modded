@@ -5523,6 +5523,174 @@ Functions.ApplyRemoveA90 = function(Value)
 	end
 end
 
+local hookedSpiderFunctions = {}
+
+Functions.FindSpiderModules = function()
+	local found = {}
+	local seen = {}
+
+	local function checkObj(obj)
+		if not obj or not obj:IsA("ModuleScript") or seen[obj] then return end
+		local name = obj.Name
+		local baseName = name:gsub("_Disabled$", "")
+		if baseName == "SpiderJumpscare" or baseName == "Spider" or baseName == "Timothy" or baseName == "TimothyJumpscare" then
+			seen[obj] = true
+			table.insert(found, obj)
+		end
+	end
+
+	local mainUI = Globals.MainUI or (LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("MainUI"))
+	if mainUI then
+		local initiator = mainUI:FindFirstChild("Initiator")
+		local mainGame = initiator and initiator:FindFirstChild("Main_Game")
+		local remoteListener = mainGame and mainGame:FindFirstChild("RemoteListener")
+		if remoteListener then
+			for _, folderName in ipairs({"Modules", "Jumpscares", "Cutscenes"}) do
+				local folder = remoteListener:FindFirstChild(folderName) or remoteListener:FindFirstChild(folderName .. "_Disabled")
+				if folder then
+					for _, child in ipairs(folder:GetChildren()) do
+						checkObj(child)
+					end
+				end
+			end
+			for _, child in ipairs(remoteListener:GetChildren()) do
+				checkObj(child)
+			end
+		end
+		for _, desc in ipairs(mainUI:GetDescendants()) do
+			checkObj(desc)
+		end
+	end
+
+	if ClientModules then
+		for _, desc in ipairs(ClientModules:GetDescendants()) do
+			checkObj(desc)
+		end
+	end
+
+	if FloorReplicated then
+		for _, desc in ipairs(FloorReplicated:GetDescendants()) do
+			checkObj(desc)
+		end
+	end
+
+	if Services.ReplicatedStorage then
+		for _, name in ipairs({"SpiderJumpscare", "Spider", "Timothy", "SpiderJumpscare_Disabled", "Spider_Disabled", "Timothy_Disabled"}) do
+			local m = Services.ReplicatedStorage:FindFirstChild(name, true)
+			if m then checkObj(m) end
+		end
+	end
+
+	return found
+end
+
+Functions.HookSpiderModule = function(spiderModule)
+	if not spiderModule or not spiderModule:IsA("ModuleScript") then return end
+
+	local req = Abysall and Abysall.Environment and Abysall.Environment.require or require
+	local hf = hookfunction or (Abysall and Abysall.Environment and Abysall.Environment.hookfunction)
+	if not hf then return end
+
+	local ok, res = pcall(req, spiderModule)
+	if not ok or not res then return end
+
+	local function hookTarget(fn)
+		if type(fn) ~= "function" or hookedSpiderFunctions[fn] then return end
+		local oldFn
+		oldFn = hf(fn, newcclosure(function(...)
+			if Toggles.DisableTimothyJumpscare and Toggles.DisableTimothyJumpscare.Value then
+				return
+			end
+			return oldFn(...)
+		end))
+		hookedSpiderFunctions[fn] = true
+		if oldFn and type(oldFn) == "function" then
+			hookedSpiderFunctions[oldFn] = true
+		end
+	end
+
+	if type(res) == "function" then
+		hookTarget(res)
+	elseif type(res) == "table" then
+		for _, v in pairs(res) do
+			if type(v) == "function" then
+				hookTarget(v)
+			end
+		end
+	end
+end
+
+local function CleanSpiderArtifacts()
+	local cam = workspace.CurrentCamera or Camera or workspace:FindFirstChild("Camera")
+	if cam then
+		for _, obj in ipairs(cam:GetChildren()) do
+			local n = obj.Name:lower()
+			if n:find("spider") or n:find("timothy") then
+				pcall(function() obj:Destroy() end)
+			end
+		end
+	end
+
+	for _, s in ipairs(Services.SoundService:GetDescendants()) do
+		if s:IsA("Sound") then
+			local n = s.Name:lower()
+			if n:find("spider") or n:find("timothy") then
+				s.Volume = 0
+				s:Stop()
+			end
+		end
+	end
+
+	local mainUI = Globals.MainUI or (LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("MainUI"))
+	if mainUI then
+		for _, obj in ipairs(mainUI:GetDescendants()) do
+			if obj:IsA("GuiObject") then
+				local n = obj.Name:lower()
+				if n:find("spider") or n:find("timothy") then
+					obj.Visible = false
+					pcall(function() obj:Destroy() end)
+				end
+			end
+		end
+	end
+end
+
+Functions.ApplyDisableTimothyJumpscare = function(Value)
+	local modulesList = Functions.FindSpiderModules()
+	for _, spiderMod in ipairs(modulesList) do
+		Modules.SpiderJumpscare = spiderMod
+
+		Functions.HookSpiderModule(spiderMod)
+
+		local baseName = spiderMod.Name:gsub("_Disabled$", "")
+		if Value then
+			spiderMod.Name = baseName .. "_Disabled"
+		else
+			spiderMod.Name = baseName
+		end
+	end
+
+	local spiderRemote = RemotesFolder and (RemotesFolder:FindFirstChild("Spider") or RemotesFolder:FindFirstChild("Timothy") or RemotesFolder:FindFirstChild("SpiderJumpscare"))
+	if spiderRemote and Abysall and Abysall.Environment and Abysall.Environment.getconnections then
+		pcall(function()
+			local conns = Abysall.Environment.getconnections(spiderRemote.OnClientEvent)
+			if conns then
+				for _, conn in ipairs(conns) do
+					if Value then
+						conn:Disable()
+					else
+						conn:Enable()
+					end
+				end
+			end
+		end)
+	end
+
+	if Value then
+		CleanSpiderArtifacts()
+	end
+end
+
 Toggles.RemoveScreech:OnChanged(function(Value)
 	if Value then
 		task.spawn(function()
@@ -5763,8 +5931,27 @@ Toggles.DisableGlitchJumpscare:OnChanged(function(Value)
 	end
 end)
 Toggles.DisableTimothyJumpscare:OnChanged(function(Value)
-	if Modules and Modules.SpiderJumpscare then
+	if Functions.ApplyDisableTimothyJumpscare then
+		Functions.ApplyDisableTimothyJumpscare(Value)
+	elseif Modules and Modules.SpiderJumpscare then
 		Modules.SpiderJumpscare.Name = Value and "SpiderJumpscare_Disabled" or "SpiderJumpscare"
+	end
+
+	if Value then
+		task.spawn(function()
+			while Toggles.DisableTimothyJumpscare.Value do
+				local cam = workspace.CurrentCamera or Camera or workspace:FindFirstChild("Camera")
+				if cam then
+					for _, obj in ipairs(cam:GetChildren()) do
+						local n = obj.Name:lower()
+						if n:find("spider") or n:find("timothy") then
+							pcall(function() obj:Destroy() end)
+						end
+					end
+				end
+				task.wait(0.25)
+			end
+		end)
 	end
 end)
 Toggles.DisableVoidJumpscare:OnChanged(function(Value)
@@ -7292,16 +7479,33 @@ Functions.HandleCharacter = function(NewCharacter)
 
 	Globals.AnticheatDisabled = false
 
-	local UIModules = Globals.MainUI.Initiator.Main_Game.RemoteListener.Modules
-	Modules.A90             = UIModules:FindFirstChild("A90") or UIModules:FindFirstChild("A-90") or (Functions.FindA90Module and Functions.FindA90Module())
-	Modules.Screech         = UIModules.Screech
-	Modules.Dread           = UIModules:FindFirstChild("Dread")
-	Modules.SpiderJumpscare = UIModules.SpiderJumpscare
+	local UIModules = Globals.MainUI and Globals.MainUI:FindFirstChild("Initiator")
+		and Globals.MainUI.Initiator:FindFirstChild("Main_Game")
+		and Globals.MainUI.Initiator.Main_Game:FindFirstChild("RemoteListener")
+		and Globals.MainUI.Initiator.Main_Game.RemoteListener:FindFirstChild("Modules")
 
-	if Toggles.RemoveScreech.Value    then Modules.Screech.Name = "Screech_Disabled" print ("screech gone") end
+	if UIModules then
+		Modules.A90             = UIModules:FindFirstChild("A90") or UIModules:FindFirstChild("A-90") or (Functions.FindA90Module and Functions.FindA90Module())
+		Modules.Screech         = UIModules:FindFirstChild("Screech") or UIModules:FindFirstChild("Screech_Disabled")
+		Modules.Dread           = UIModules:FindFirstChild("Dread") or UIModules:FindFirstChild("Dread_Disabled")
+		local foundSpiders      = Functions.FindSpiderModules and Functions.FindSpiderModules()
+		Modules.SpiderJumpscare = (foundSpiders and foundSpiders[1]) or UIModules:FindFirstChild("SpiderJumpscare") or UIModules:FindFirstChild("SpiderJumpscare_Disabled")
+	else
+		if Functions.FindA90Module then Modules.A90 = Functions.FindA90Module() end
+		if Functions.FindSpiderModules then
+			local foundSpiders = Functions.FindSpiderModules()
+			Modules.SpiderJumpscare = foundSpiders and foundSpiders[1]
+		end
+	end
+
+	if Toggles.RemoveScreech.Value and Modules.Screech then Modules.Screech.Name = "Screech_Disabled" print ("screech gone") end
 	if Toggles.RemoveA90.Value and Functions.ApplyRemoveA90 then Functions.ApplyRemoveA90(true) end
 	if Toggles.RemoveDread.Value and Modules.Dread then Modules.Dread.Name = "Dread_Disabled" end
-	if Toggles.DisableTimothyJumpscare.Value then Modules.SpiderJumpscare.Name = "SpiderJumpscare_Disabled" end
+	if Toggles.DisableTimothyJumpscare.Value and Functions.ApplyDisableTimothyJumpscare then
+		Functions.ApplyDisableTimothyJumpscare(true)
+	elseif Toggles.DisableTimothyJumpscare.Value and Modules.SpiderJumpscare then
+		Modules.SpiderJumpscare.Name = "SpiderJumpscare_Disabled"
+	end
 
 	if Toggles.DisableHideVignette.Value then
 		local Vignette = Globals.MainUI:FindFirstChild("HideVignette") or Globals.MainUI.MainFrame:FindFirstChild("HideVignette")
@@ -9261,6 +9465,11 @@ Connections.FloorReplicatedHandler = FloorReplicated.DescendantAdded:Connect(fun
 		Modules.GlitchScreech = Object
 		if Toggles.RemoveScreech.Value then Object.Name = "GlitchScreech_Disabled" end
 	end
+	if Object.Name:lower():find("spider") or Object.Name:lower():find("timothy") then
+		if Functions.ApplyDisableTimothyJumpscare and Toggles.DisableTimothyJumpscare and Toggles.DisableTimothyJumpscare.Value then
+			Functions.ApplyDisableTimothyJumpscare(true)
+		end
+	end
 	if Object.Name:find("Jumpscare") and Object:IsA("ModuleScript")
 		and not Object.Name:find("Eyestalk") and not Object.Name:find("Groundskeeper") and not Object.Name:find("Monument")
 	then
@@ -9546,6 +9755,12 @@ Functions.HookCamera = function(cam)
 		if isNoise then
 			task.spawn(Functions.HandleEntitySpawn, child)
 		end
+		local isSpider = typeof(cname) == "string" and (cname:lower():find("spider") ~= nil or cname:lower():find("timothy") ~= nil)
+		if isSpider and Toggles.DisableTimothyJumpscare and Toggles.DisableTimothyJumpscare.Value then
+			task.defer(function()
+				pcall(function() child:Destroy() end)
+			end)
+		end
 	end
 
 	Connections.CameraEntityHandler = cam.ChildAdded:Connect(CheckCamEntity)
@@ -9765,6 +9980,9 @@ Library:OnUnload(function()
 	}
 	for Key, OriginalName in ModuleRestores do
 		if Modules[Key] then Modules[Key].Name = OriginalName end
+	end
+	if Functions.ApplyDisableTimothyJumpscare then
+		Functions.ApplyDisableTimothyJumpscare(false)
 	end
 
 	if FakeEvents.Screech then FakeEvents.Screech:Destroy() end
