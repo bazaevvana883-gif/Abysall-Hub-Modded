@@ -1,17 +1,17 @@
 return function(Window)
 	local Changelog = {
-		"5/9/2026",
-		"<font color='rgb(0, 255, 0)'>+ NEILS HUB STOLE FROM ABYSALL HUB CONTINUED!</font>",
-		"<font color='rgb(0, 255, 0)'>+ USE THE ORRIGNAL SCRIPT HERE: dsc.gg/abysallhubcontinued!</font>",
-		"<font color='rgb(0, 255, 0)'>+ NEILS HUB STOLE FROM ABYSALL HUB CONTINUED!</font>",
-		"<font color='rgb(0, 255, 0)'>+ NEILS HUB STOLE FROM ABYSALL HUB CONTINUED!</font>",
-		"<font color='rgb(0, 255, 0)'>+ USE THE ORRIGNAL SCRIPT HERE: dsc.gg/abysallhubcontinued!</font>",
-		"<font color='rgb(0, 255, 0)'>+ NEILS HUB STOLE FROM ABYSALL HUB CONTINUED!</font>",
-		"<font color='rgb(0, 255, 0)'>+ ignore this if u are my fellow abysall user</font>",
-		"<font color='rgb(255, 255, 0)'>~ Updated Sally notification message</font>",
-		"<font color='rgb(255, 255, 0)'>~ Expanded ItemNames & Entities lists</font>",
-		"<font color='rgb(255, 255, 0)'>~ Forgot to add supporter list so i could add it later</font>",
-		"<font color='rgb(255, 0, 0)'>- Removed FireBacon</font>",
+		"16/10/2026",
+		"<font color='rgb(0, 255, 0)'>+ Added Auto Position Spoof</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Method Velocity Manipulation</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Speed Velocity Manipulation</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Method Noise Tv Breaker</font>",
+		"<font color='rgb(255, 255, 0)'>~ Changed Max Speed 100 to 75</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Noise Tv Breaker</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Tp to trash and drop</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Disable Timothy Jumpscare</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Remove A-90</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Mobile Crash When use Teleport Items</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Forget Me or Not Skipper</font>",
 	}
 
 	local function cloneref(service)
