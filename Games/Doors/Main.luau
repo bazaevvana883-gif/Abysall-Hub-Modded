@@ -170,7 +170,7 @@ local Components = {
     Obsidian_Library     = { File = "Obsidian_Library.lua",      Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua" },
     Obsidian_SaveManager = { File = "Obsidian_SaveManager.lua",  Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/SaveManager.lua" },
     Obsidian_ThemeManager= { File = "Obsidian_ThemeManager.lua", Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/ThemeManager.lua" },
-    InfoTab              = { File = "InfoTab.luau",              Url = BaseUrl .. "Components/InfoTab.luau" },
+    InfoTab              = { File = "sub_InfoTab.luau",          Url = "https://raw.githubusercontent.com/snopiL0711/Abysall-Hub-Modded/refs/heads/main/Components/sub_InfoTab.luau" },
     SettingsTab          = { File = "SettingsTab.luau",          Url = BaseUrl .. "Components/SettingsTab.luau" },
 }
 
@@ -284,6 +284,123 @@ local function SafeLoadComponent(key)
     if not src or #src < 50 then
         src = GetScript(Components[key].File, Components[key].Url)
         LoadedSource[key] = src
+    end
+    if key == "InfoTab" and (not src or #src < 50) then
+        src = [==[return function(Window)
+	local Changelog = {
+		"5/9/2026",
+		"<font color='rgb(0, 255, 0)'>+ Added Auto Position Spoof</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Method Velocity Manipulation</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Speed Velocity Manipulation</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Method Noise Tv Breaker</font>",
+		"<font color='rgb(255, 255, 0)'>~ Changed Max Speed 100 to 75</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Noise Tv Breaker</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Tp to trash and drop</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Disable Timothy Jumpscare</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Remove A-90</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Mobile Crash When use Teleport Items</font>",
+		"<font color='rgb(255, 255, 0)'>~ Fixed Forget Me or Not Skipper</font>",
+	}
+
+	local function cloneref(service)
+		if Abysall and Abysall.Environment.cloneref then
+			return Abysall.Environment.cloneref(service)
+		else
+			return service
+		end
+	end
+
+	local Services = setmetatable({}, {
+		__index = function(self, serviceName)
+			return cloneref(game:GetService(serviceName))
+		end,
+	})
+
+	local Library = Abysall.Interface.Library
+	local SaveManager = Abysall.Interface.SaveManager
+	local ThemeManager = Abysall.Interface.ThemeManager
+	local Toggles = Library.Toggles
+	local Options = Library.Options
+
+	local LocalPlayer = Services.Players.LocalPlayer
+	local InfoTab = Window:AddTab("Info", "user")
+
+	local UserInfo = InfoTab:AddLeftGroupbox("User Info")
+
+	local thumbnailSize = Enum.ThumbnailSize.Size420x420
+	local thumbnailType = Enum.ThumbnailType.HeadShot
+	local userThumbnail = Services.Players:GetUserThumbnailAsync(LocalPlayer.UserId, thumbnailType, thumbnailSize)
+
+	UserInfo:AddImage("UserIcon", {
+		Image = userThumbnail,
+	})
+
+	UserInfo:AddLabel("ID: " .. LocalPlayer.Name, true)
+	UserInfo:AddLabel("Total Executions: " .. ((Abysall.TotalExecutions and Abysall.TotalExecutions) or "N/A"), true)
+
+	local Credits = {
+		"<font color='rgb(0, 255, 255)'>CookieMonster — Owner of the Continued Script</font>",
+		"<font color='rgb(255, 165, 0)'>FireBacon — Owner of the Discontinued Script</font>",
+        "<font color='rgb(255, 165, 0)'>snopiL — Owner of the Modded Script</font>",
+		"<font color='rgb(197, 63, 132)'>Rhyan57 — Provided the Infinite Crucifix</font>",
+		"<font color='rgb(241, 106, 212)'>Abbas - Basicly a developer</font>",
+		"<font color='rgb(120, 200, 255)'>den4ik_top_off - Theme creator</font>",
+		"<font color='rgb(120, 200, 255)'>sasanixx - Theme creator</font>",
+		"<font color='rgb(50, 205, 50)'>" .. LocalPlayer.Name .. " — For Using This Script</font>",
+	}
+
+	local CreditsGroupbox = InfoTab:AddRightGroupbox("Credits")
+	for _, credit in pairs(Credits) do
+		CreditsGroupbox:AddLabel(credit, true)
+	end
+
+	local ChangelogGroupbox = InfoTab:AddRightGroupbox("Changelog")
+	for _, log in pairs(Changelog) do
+		ChangelogGroupbox:AddLabel(log, true)
+	end
+
+	local executorName, executorVersion = Abysall.Environment.identifyexecutor()
+
+	local ExecutorInfo = InfoTab:AddRightGroupbox("Executor Info")
+	ExecutorInfo:AddLabel("Name: " .. executorName, true)
+	ExecutorInfo:AddLabel("Version: " .. ((executorVersion and executorVersion) or "N/A"), true)
+	ExecutorInfo:AddDivider()
+
+	ExecutorInfo:AddLabel("Test Result: ", true)
+	for _, result in pairs(Abysall.Environment.Results) do
+		result = result:gsub("<", "(")
+		result = result:gsub(">", ")")
+		ExecutorInfo:AddLabel(result, true)
+	end
+
+	local Scripts = InfoTab:AddLeftGroupbox("Scripts")
+	Scripts:AddButton("InfiniteYield", {
+		Text = "Infinite Yield",
+		Default = false,
+		Tooltip = "Runs infinite yield.",
+		Func = function()
+			loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+		end,
+	})
+
+	Scripts:AddButton("Dex", {
+		Text = "Dex",
+		Default = false,
+		Tooltip = "Runs Dex.",
+		Func = function()
+			Library:Notify("Please wait.")
+			loadstring(game:HttpGet("https://github.com/AZYsGithub/DexPlusPlus/releases/latest/download/out.lua"))()
+		end,
+	})
+
+	local Community = InfoTab:AddLeftGroupbox("Community")
+	Community:AddButton("Copy Discord Invite", function()
+		toclipboard("https://dsc.gg/abysallhubcontinued")
+		Library:Notify("Discord invite copied.")
+	end)
+end]==]
+        LoadedSource[key] = src
+        SaveLocalFile("sub_InfoTab.luau", src)
     end
     local fn, err = loadstring(src)
     if not fn then
@@ -1078,12 +1195,14 @@ if RemotesFolder then
 	RemotesFolder.ChildAdded:Connect(function(child)
 		if child.Name == "A90" or child.Name == "A-90" then
 			FakeEvents.A90_Real = child
-			if Functions and Functions.ApplyRemoveA90 and Toggles and Toggles.RemoveA90 and Toggles.RemoveA90.Value then
-				Functions.ApplyRemoveA90(true)
-			elseif Toggles and Toggles.NoA90Damage and Toggles.NoA90Damage.Value then
-				FakeEvents.A90.Parent = RemotesFolder
-				FakeEvents.A90_Real.Parent = nil
-			end
+			pcall(function()
+				if Functions and Functions.ApplyRemoveA90 and Toggles and Toggles.RemoveA90 and Toggles.RemoveA90.Value then
+					Functions.ApplyRemoveA90(true)
+				elseif Toggles and Toggles.NoA90Damage and Toggles.NoA90Damage.Value then
+					FakeEvents.A90.Parent = RemotesFolder
+					FakeEvents.A90_Real.Parent = nil
+				end
+			end)
 		end
 	end)
 end
@@ -1544,7 +1663,9 @@ local Window = Library:CreateWindow({
 
 
 
-Abysall.Interface.ApplyInfoTab(Window)
+if Abysall.Interface.ApplyInfoTab then
+	pcall(Abysall.Interface.ApplyInfoTab, Window)
+end
 
 local Tabs = {
 	General = Window:AddTab("General", "house"),
@@ -1565,7 +1686,7 @@ end)
 
 Groupboxes.General_Character = Tabs.General:AddLeftGroupbox("Character")
 Groupboxes.General_Character:AddSlider("SpeedBoostSlider", {
-	Text = "Speed Boost", Min = 0, Max = 100, Default = 0, Rounding = 0, Compact = true
+	Text = "Speed Boost", Min = 0, Max = 75, Default = 0, Rounding = 0, Compact = true
 })
 Groupboxes.General_Character:AddToggle("SpeedBoostToggle", {
 	Text = "Enable Speed Boost", Default = false, Tooltip = "Increases your walkspeed by the specified amount."
@@ -5554,49 +5675,57 @@ Groupboxes.Exploits_Remove:AddToggle("NoSurgeDamage",   { Text = "No Surge Damag
 
 Toggles.NoScreechDamage:OnChanged(function(Value)
 	if not FakeEvents.Screech_Real or not RemotesFolder then return end
-	if Value then
-		FakeEvents.Screech.Parent = RemotesFolder
-		FakeEvents.Screech_Real.Parent = nil
-	else
-		FakeEvents.Screech_Real.Parent = RemotesFolder
-		FakeEvents.Screech.Parent = nil
-	end
+	pcall(function()
+		if Value then
+			if FakeEvents.Screech then FakeEvents.Screech.Parent = RemotesFolder end
+			FakeEvents.Screech_Real.Parent = nil
+		else
+			FakeEvents.Screech_Real.Parent = RemotesFolder
+			if FakeEvents.Screech then FakeEvents.Screech.Parent = nil end
+		end
+	end)
 end)
 Toggles.NoHaltDamage:OnChanged(function(Value)
 	if not FakeEvents.Shade_Real or not RemotesFolder then return end
-	if Value then
-		FakeEvents.Shade.Parent = RemotesFolder
-		FakeEvents.Shade_Real.Parent = nil
-	else
-		FakeEvents.Shade_Real.Parent = RemotesFolder
-		FakeEvents.Shade.Parent = nil
-	end
+	pcall(function()
+		if Value then
+			if FakeEvents.Shade then FakeEvents.Shade.Parent = RemotesFolder end
+			FakeEvents.Shade_Real.Parent = nil
+		else
+			FakeEvents.Shade_Real.Parent = RemotesFolder
+			if FakeEvents.Shade then FakeEvents.Shade.Parent = nil end
+		end
+	end)
 end)
 
 Toggles.NoA90Damage:OnChanged(function(Value)
 	local realRemote = FakeEvents.A90_Real or (RemotesFolder and (RemotesFolder:FindFirstChild("A90") or RemotesFolder:FindFirstChild("A-90")))
 	if realRemote then
 		FakeEvents.A90_Real = realRemote
-		if Value then
-			FakeEvents.A90.Parent = RemotesFolder
-			realRemote.Parent = nil
-		else
-			if not (Toggles.RemoveA90 and Toggles.RemoveA90.Value) then
-				realRemote.Parent = RemotesFolder
-				FakeEvents.A90.Parent = nil
+		pcall(function()
+			if Value then
+				if FakeEvents.A90 then FakeEvents.A90.Parent = RemotesFolder end
+				realRemote.Parent = nil
+			else
+				if not (Toggles.RemoveA90 and Toggles.RemoveA90.Value) then
+					realRemote.Parent = RemotesFolder
+					if FakeEvents.A90 then FakeEvents.A90.Parent = nil end
+				end
 			end
-		end
+		end)
 	end
 end)
 Toggles.NoSurgeDamage:OnChanged(function(Value)
-	if RemotesFolder:FindFirstChild("SurgeRemote") then
-		if Value then
-			FakeEvents.Surge.Parent = RemotesFolder
-			FakeEvents.Surge_Real.Parent = nil
-		else
-			FakeEvents.Surge_Real.Parent = RemotesFolder
-			FakeEvents.Surge.Parent = nil
-		end
+	if RemotesFolder:FindFirstChild("SurgeRemote") or FakeEvents.Surge_Real then
+		pcall(function()
+			if Value then
+				if FakeEvents.Surge then FakeEvents.Surge.Parent = RemotesFolder end
+				if FakeEvents.Surge_Real then FakeEvents.Surge_Real.Parent = nil end
+			else
+				if FakeEvents.Surge_Real then FakeEvents.Surge_Real.Parent = RemotesFolder end
+				if FakeEvents.Surge then FakeEvents.Surge.Parent = nil end
+			end
+		end)
 	end
 end)
 
@@ -5637,7 +5766,9 @@ Functions.ApplyRemoveA90 = function(Value)
 	local a90Module = Functions.FindA90Module()
 	if a90Module then
 		Modules.A90 = a90Module
-		a90Module.Name = Value and "A90_Disabled" or "A90"
+		pcall(function()
+			a90Module.Name = Value and "A90_Disabled" or "A90"
+		end)
 	end
 
 	local realRemote = FakeEvents.A90_Real or (RemotesFolder and (RemotesFolder:FindFirstChild("A90") or RemotesFolder:FindFirstChild("A-90")))
@@ -5658,15 +5789,17 @@ Functions.ApplyRemoveA90 = function(Value)
 			end)
 		end
 		if RemotesFolder then
-			if Value then
-				FakeEvents.A90.Parent = RemotesFolder
-				realRemote.Parent = nil
-			else
-				if not (Toggles.NoA90Damage and Toggles.NoA90Damage.Value) then
-					realRemote.Parent = RemotesFolder
-					FakeEvents.A90.Parent = nil
+			pcall(function()
+				if Value then
+					if FakeEvents.A90 then FakeEvents.A90.Parent = RemotesFolder end
+					realRemote.Parent = nil
+				else
+					if not (Toggles.NoA90Damage and Toggles.NoA90Damage.Value) then
+						realRemote.Parent = RemotesFolder
+						if FakeEvents.A90 then FakeEvents.A90.Parent = nil end
+					end
 				end
-			end
+			end)
 		end
 	end
 
@@ -10140,84 +10273,112 @@ Library:OnUnload(function()
 		SpiderJumpscare = "SpiderJumpscare", A90 = "A90", Dread = "Dread", Void = "Void"
 	}
 	for Key, OriginalName in ModuleRestores do
-		if Modules[Key] then Modules[Key].Name = OriginalName end
+		pcall(function()
+			if Modules[Key] then Modules[Key].Name = OriginalName end
+		end)
 	end
 	if Functions.ApplyDisableTimothyJumpscare then
-		Functions.ApplyDisableTimothyJumpscare(false)
+		pcall(function() Functions.ApplyDisableTimothyJumpscare(false) end)
+	end
+	if Functions.ApplyRemoveA90 then
+		pcall(function() Functions.ApplyRemoveA90(false) end)
 	end
 
-	if FakeEvents.Screech then FakeEvents.Screech:Destroy() end
-	if FakeEvents.Screech_Real and RemotesFolder then FakeEvents.Screech_Real.Parent = RemotesFolder end
-	if FakeEvents.Shade then FakeEvents.Shade:Destroy() end
-	if FakeEvents.Shade_Real and RemotesFolder then FakeEvents.Shade_Real.Parent = RemotesFolder end
+	pcall(function() if FakeEvents.Screech then FakeEvents.Screech:Destroy() end end)
+	pcall(function() if FakeEvents.Screech_Real and RemotesFolder then FakeEvents.Screech_Real.Parent = RemotesFolder end end)
+	pcall(function() if FakeEvents.Shade then FakeEvents.Shade:Destroy() end end)
+	pcall(function() if FakeEvents.Shade_Real and RemotesFolder then FakeEvents.Shade_Real.Parent = RemotesFolder end end)
 
-	if FakeEvents.A90_Real then
-		FakeEvents.A90:Destroy()
-		FakeEvents.A90_Real.Parent = RemotesFolder
-	end
-	if FakeEvents.Surge_Real then
-		FakeEvents.Surge:Destroy()
-		FakeEvents.Surge_Real.Parent = RemotesFolder
-	end
+	pcall(function() if FakeEvents.A90 then FakeEvents.A90:Destroy() end end)
+	pcall(function() if FakeEvents.A90_Real and RemotesFolder then FakeEvents.A90_Real.Parent = RemotesFolder end end)
 
-	Globals.SeekNodesFolder:Destroy()
-	Globals.RoomsNodesFolder:Destroy()
-	Globals.ManipulateBody:Destroy()
+	pcall(function() if FakeEvents.Surge then FakeEvents.Surge:Destroy() end end)
+	pcall(function() if FakeEvents.Surge_Real and RemotesFolder then FakeEvents.Surge_Real.Parent = RemotesFolder end end)
 
-	local currentRoomNum = LocalPlayer:GetAttribute("CurrentRoom")
-	local roomObj = currentRoomNum and CurrentRooms and CurrentRooms:FindFirstChild(tostring(currentRoomNum))
-	local OldAmbient = roomObj and roomObj:GetAttribute("Ambient") or Services.Lighting.Ambient
-	Services.TweenService:Create(Services.Lighting, TweenInfo.new(0.2, Enum.EasingStyle.Exponential), { Ambient = OldAmbient }):Play()
+	pcall(function() if Globals.SeekNodesFolder then Globals.SeekNodesFolder:Destroy() end end)
+	pcall(function() if Globals.RoomsNodesFolder then Globals.RoomsNodesFolder:Destroy() end end)
+	pcall(function() if Globals.ManipulateBody then Globals.ManipulateBody:Destroy() end end)
+
+	pcall(function()
+		local currentRoomNum = LocalPlayer:GetAttribute("CurrentRoom")
+		local roomObj = currentRoomNum and CurrentRooms and CurrentRooms:FindFirstChild(tostring(currentRoomNum))
+		local OldAmbient = roomObj and roomObj:GetAttribute("Ambient") or Services.Lighting.Ambient
+		Services.TweenService:Create(Services.Lighting, TweenInfo.new(0.2, Enum.EasingStyle.Exponential), { Ambient = OldAmbient }):Play()
+	end)
 
 	for _, Prompt in Objects.Prompts do
-		if FakePrompts[Prompt] then
-			FakePrompts[Prompt].Parent = Prompt.Parent
-			Prompt:Destroy()
-		end
-		if Prompt.Parent then
-			Prompt.HoldDuration = Prompt:GetAttribute("HoldDuration_Old") or Prompt.HoldDuration
-			Prompt.RequiresLineOfSight = Prompt:GetAttribute("RequiresLineOfSight_Old") or Prompt.RequiresLineOfSight
-			Prompt.MaxActivationDistance = Prompt:GetAttribute("MaxActivationDistance_Old") or Prompt.MaxActivationDistance
-		end
+		pcall(function()
+			if FakePrompts[Prompt] then
+				if Prompt.Parent then
+					FakePrompts[Prompt].Parent = Prompt.Parent
+				end
+				FakePrompts[Prompt] = nil
+				Prompt:Destroy()
+			end
+			if Prompt and Prompt.Parent then
+				Prompt.HoldDuration = Prompt:GetAttribute("HoldDuration_Old") or Prompt.HoldDuration
+				Prompt.RequiresLineOfSight = Prompt:GetAttribute("RequiresLineOfSight_Old") or Prompt.RequiresLineOfSight
+				Prompt.MaxActivationDistance = Prompt:GetAttribute("MaxActivationDistance_Old") or Prompt.MaxActivationDistance
+			end
+		end)
 	end
 
-	Character:SetAttribute("CanJump",  OldJump)
-	Character:SetAttribute("CanSlide", OldSlide)
+	pcall(function()
+		if Character and Character.Parent then
+			Character:SetAttribute("CanJump",  OldJump)
+			Character:SetAttribute("CanSlide", OldSlide)
+		end
+	end)
 
 	for _, Object in Services.Workspace:GetDescendants() do
-		task.spawn(function() Functions.RemoveESP(Object) end)
+		task.spawn(function()
+			pcall(function() Functions.RemoveESP(Object) end)
+		end)
 	end
 
-	Humanoid.WalkSpeed  = Functions.GetCurrentSpeed()
-	Humanoid.JumpPower  = 5
-	Humanoid.HipHeight  = 2.367
+	pcall(function()
+		if Humanoid and Humanoid.Parent then
+			Humanoid.WalkSpeed  = Functions.GetCurrentSpeed()
+			Humanoid.JumpPower  = 5
+			Humanoid.HipHeight  = 2.367
+		end
+	end)
 
-	local BaseY = 0.18
-	Collision.Position          = RootPart.Position + Vector3.new(0, BaseY, 0)
-	CollisionPart.Position      = RootPart.Position + Vector3.new(0, BaseY, 0)
-	CollisionPartClone.Position = RootPart.Position + Vector3.new(0, BaseY, 0)
+	pcall(function()
+		local BaseY = 0.18
+		if Collision and RootPart then Collision.Position = RootPart.Position + Vector3.new(0, BaseY, 0) end
+		if CollisionPart and RootPart then CollisionPart.Position = RootPart.Position + Vector3.new(0, BaseY, 0) end
+		if CollisionPartClone and RootPart then CollisionPartClone.Position = RootPart.Position + Vector3.new(0, BaseY, 0) end
 
-	if Character:FindFirstChild("LowerTorso") and Character.LowerTorso:FindFirstChild("Root") then
-		Character.LowerTorso.Root.C1 = Globals.OriginalC1
-	end
-	if Collision:FindFirstChild("CollisionCrouch") then
-		Collision.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, -0.982, 0)
-	end
+		if Character and Character:FindFirstChild("LowerTorso") and Character.LowerTorso:FindFirstChild("Root") and Globals.OriginalC1 then
+			Character.LowerTorso.Root.C1 = Globals.OriginalC1
+		end
+		if Collision and Collision:FindFirstChild("CollisionCrouch") and RootPart then
+			Collision.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, -0.982, 0)
+		end
+	end)
 
-	CollisionClone:Destroy()
-	CollisionPartClone:Destroy()
-	Abysall.ESPLibrary:Unload()
+	pcall(function() if CollisionClone then CollisionClone:Destroy() end end)
+	pcall(function() if CollisionPartClone then CollisionPartClone:Destroy() end end)
+	pcall(function() if Abysall.ESPLibrary then Abysall.ESPLibrary:Unload() end end)
 
-	if Main_Game then
-		Main_Game.fovtarget   = 70
-		Main_Game.spring.Speed = 8
-		Main_Game.tooloffset   = Vector3.zero
-	end
+	pcall(function()
+		if Main_Game then
+			Main_Game.fovtarget   = 70
+			Main_Game.spring.Speed = 8
+			Main_Game.tooloffset   = Vector3.zero
+		end
+		if Services.Workspace.CurrentCamera then
+			Services.Workspace.CurrentCamera.FieldOfView = 70
+		end
+	end)
 
-	if Globals.OriginalGetMoveVector then 
-		local Controls = require(LocalPlayer.PlayerScripts.PlayerModule):GetControls()
-		Controls.GetMoveVector = Globals.OriginalGetMoveVector
-	end
+	pcall(function()
+		if Globals.OriginalGetMoveVector then 
+			local Controls = require(LocalPlayer.PlayerScripts.PlayerModule):GetControls()
+			Controls.GetMoveVector = Globals.OriginalGetMoveVector
+		end
+	end)
 
 	getgenv().Abysall = nil
 	shared.Hastelepasta = false
