@@ -71,6 +71,22 @@ local rawHttpGet = clonefunction and clonefunction(game.HttpGet) or game.HttpGet
 -- Генерация зеркал через сверхбыстрый глобальный CDN jsDelivr (не блокируется и не режется провайдерами)
 local function GetMirrorUrls(url)
     local urls = {}
+    if type(url) == "string" and (url:find("%?t=") or url:find("nocache")) then
+        table.insert(urls, url)
+        local base = url:gsub("%?.*$", "")
+        if base:find("raw.githubusercontent.com") then
+            local user, repo, branch, rest = base:match("raw%.githubusercontent%.com/([^/]+)/([^/]+)/refs/heads/([^/]+)/(.*)")
+            if not user then
+                user, repo, branch, rest = base:match("raw%.githubusercontent%.com/([^/]+)/([^/]+)/([^/]+)/(.*)")
+            end
+            if user and repo and branch and rest then
+                table.insert(urls, "https://cdn.jsdelivr.net/gh/" .. user .. "/" .. repo .. "@" .. branch .. "/" .. rest)
+                table.insert(urls, "https://fastly.jsdelivr.net/gh/" .. user .. "/" .. repo .. "@" .. branch .. "/" .. rest)
+            end
+        end
+        return urls
+    end
+
     if type(url) == "string" and url:find("raw.githubusercontent.com") then
         local user, repo, branch, rest = url:match("raw%.githubusercontent%.com/([^/]+)/([^/]+)/refs/heads/([^/]+)/(.*)")
         if not user then
@@ -170,7 +186,7 @@ local Components = {
     Obsidian_Library     = { File = "Obsidian_Library.lua",      Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua" },
     Obsidian_SaveManager = { File = "Obsidian_SaveManager.lua",  Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/SaveManager.lua" },
     Obsidian_ThemeManager= { File = "Obsidian_ThemeManager.lua", Url = "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/addons/ThemeManager.lua" },
-    InfoTab              = { File = "sub_InfoTab.luau",          Url = "https://raw.githubusercontent.com/snopiL0711/Abysall-Hub-Modded/refs/heads/main/Components/sub_InfoTab.luau" },
+    InfoTab              = { File = "sub_InfoTab.luau",          Url = "https://raw.githubusercontent.com/snopiL0711/Abysall-Hub-Modded/refs/heads/main/Components/sub_InfoTab.luau", Dynamic = true },
     SettingsTab          = { File = "SettingsTab.luau",          Url = BaseUrl .. "Components/SettingsTab.luau" },
 }
 
@@ -178,23 +194,33 @@ local LoadedSource = {}
 local missingTasks = {}
 
 for key, info in pairs(Components) do
-    local cached = ReadLocalFile(info.File)
-    if cached then
-        LoadedSource[key] = cached
+    if not info.Dynamic then
+        local cached = ReadLocalFile(info.File)
+        if cached then
+            LoadedSource[key] = cached
+        else
+            table.insert(missingTasks, { key = key, file = info.File, url = info.Url, dynamic = false })
+        end
     else
-        table.insert(missingTasks, { key = key, file = info.File, url = info.Url })
+        table.insert(missingTasks, { key = key, file = info.File, url = info.Url, dynamic = true })
     end
 end
 
--- Если каких-то компонентов нет на диске (первый запуск), скачиваем их параллельно через скоростной CDN
+-- Если каких-то компонентов нет на диске (первый запуск) или они динамические (ченжлог), скачиваем их параллельно через скоростной CDN
 if #missingTasks > 0 then
     local finished = 0
     for _, t in ipairs(missingTasks) do
         task.spawn(function()
-            local content = DownloadRaw(t.url)
+            local fetchUrl = t.dynamic and (t.url .. "?t=" .. tostring(os.time() or tick())) or t.url
+            local content = DownloadRaw(fetchUrl)
             if content and #content > 50 then
                 LoadedSource[t.key] = content
                 SaveLocalFile(t.file, content)
+            elseif t.dynamic then
+                local cached = ReadLocalFile(t.file)
+                if cached then
+                    LoadedSource[t.key] = cached
+                end
             end
             finished += 1
         end)
@@ -208,7 +234,18 @@ if #missingTasks > 0 then
     -- Докачиваем синхронно, если какая-то нить не успела
     for _, t in ipairs(missingTasks) do
         if not LoadedSource[t.key] or #LoadedSource[t.key] < 50 then
-            LoadedSource[t.key] = GetScript(t.file, t.url)
+            if t.dynamic then
+                local fetchUrl = t.url .. "?t=" .. tostring(os.time() or tick())
+                local content = DownloadRaw(fetchUrl)
+                if content and #content > 50 then
+                    LoadedSource[t.key] = content
+                    SaveLocalFile(t.file, content)
+                else
+                    LoadedSource[t.key] = ReadLocalFile(t.file)
+                end
+            else
+                LoadedSource[t.key] = GetScript(t.file, t.url)
+            end
         end
     end
 end
@@ -280,26 +317,33 @@ if Abysall.Environment.writefile and Abysall.Environment.readfile then
 end
 
 local function SafeLoadComponent(key)
+    local info = Components[key]
     local src = LoadedSource[key]
+    if info and info.Dynamic and (not src or #src < 50) then
+        local fetchUrl = info.Url .. "?t=" .. tostring(os.time() or tick())
+        local fresh = DownloadRaw(fetchUrl)
+        if fresh and #fresh > 50 then
+            src = fresh
+            LoadedSource[key] = fresh
+            SaveLocalFile(info.File, fresh)
+        else
+            src = ReadLocalFile(info.File)
+            LoadedSource[key] = src
+        end
+    end
     if not src or #src < 50 then
-        src = GetScript(Components[key].File, Components[key].Url)
-        LoadedSource[key] = src
+        if info then
+            src = GetScript(info.File, info.Url)
+            LoadedSource[key] = src
+        end
     end
     if key == "InfoTab" and (not src or #src < 50) then
         src = [==[return function(Window)
 	local Changelog = {
-		"5/9/2026",
-		"<font color='rgb(0, 255, 0)'>+ Added Auto Position Spoof</font>",
-		"<font color='rgb(0, 255, 0)'>+ Added Method Velocity Manipulation</font>",
-		"<font color='rgb(0, 255, 0)'>+ Added Speed Velocity Manipulation</font>",
-		"<font color='rgb(0, 255, 0)'>+ Added Method Noise Tv Breaker</font>",
-		"<font color='rgb(255, 255, 0)'>~ Changed Max Speed 100 to 75</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Noise Tv Breaker</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Tp to trash and drop</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Disable Timothy Jumpscare</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Remove A-90</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Mobile Crash When use Teleport Items</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Forget Me or Not Skipper</font>",
+		"17/10/2026",
+		"<font color='rgb(0, 255, 0)'>+ Added Skip Gate Room</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Crazy Cart Creak</font>",
+		"<font color='rgb(255, 255, 0)'>~ Boost Infinite Items</font>",
 	}
 
 	local function cloneref(service)
@@ -508,9 +552,6 @@ local OrbitDroppedItemsAngle = 0
 local OrbitDroppedItemsLastTeleport = 0
 local OrbitDroppedItemsPauseUntil = 0
 local droppedItemsIntervalRunning = false
-local Connections = {}
-
-
 
 local Globals = { Running = true }
 local Connections = {}
@@ -2652,6 +2693,7 @@ end)
 
 
 
+do
 local AutoHotelConnection
 local AutoHotelLibraryConnection
 local AutoHotelLibraryRoomConnection
@@ -3048,6 +3090,7 @@ Toggles.AutoHotel:OnChanged(function(AutoHotelEnabled)
 		end
 	end)
 end)
+end
 
 
 Groupboxes.Debug = Tabs.General:AddRightGroupbox("Debug")
@@ -3220,7 +3263,246 @@ Groupboxes.Exploits_Bypass:AddToggle("BypassSeekingWall",    { Text = "Bypass Se
 Groupboxes.Exploits_Bypass:AddToggle("BypassSnare",          { Text = "Bypass Snare",            Default = false, Tooltip = "Prevents 'Snare' from trapping you." })
 Groupboxes.Exploits_Bypass:AddToggle("BypassBanana",         { Text = "Bypass Banana",           Default = false, Tooltip = "Prevents 'Banana Peel' from slipping you up (sometimes doesn't work)." })
 Groupboxes.Exploits_Bypass:AddToggle("BypassJeff",           { Text = "Bypass Jeff",             Default = false, Tooltip = "Prevents 'Jeff the Killer' from stabbing you (sometimes doesn't work)." })
+Groupboxes.Exploits_Skip = Tabs.Exploits:AddLeftGroupbox("Skip")
+Groupboxes.Exploits_Skip:AddToggle("SkipGateRooms",        { Text = "Skip Gate Rooms",         Default = false, Tooltip = "Automatically teleports you to the next door when entering a room with a Gate until the door opens (Hotel only)." })
 
+
+do
+	local isSkippingGate = false
+	local skipGateTask = nil
+	local skippedGateRooms = {}
+	local maxRoomReached = 0
+
+	local function IsHotelFloor()
+		local currentFloor = (GameData and GameData:FindFirstChild("Floor") and GameData.Floor.Value) or Floor
+		return currentFloor == "Hotel" or currentFloor == "OldHotel"
+	end
+
+	local function IsGateRoom(room)
+		if not room or not room:IsA("Model") then return false end
+
+		-- Проверка рычагов и моделей решеток в отеле
+		if room:FindFirstChild("LeverForGate", true)
+			or room:FindFirstChild("Gate", true)
+			or room:FindFirstChild("ThingToOpen", true)
+			or room:FindFirstChild("BasementGate", true) then
+			return true
+		end
+
+		-- Проверка в папке Assets
+		local assets = room:FindFirstChild("Assets")
+		if assets then
+			for _, child in ipairs(assets:GetChildren()) do
+				local name = child.Name
+				if name == "Gate" or name == "LeverForGate" or name == "ThingToOpen" or name:find("Gate") then
+					return true
+				end
+			end
+		end
+
+		-- Прямые дочерние элементы комнаты
+		for _, child in ipairs(room:GetChildren()) do
+			local name = child.Name
+			if name == "Gate" or name == "LeverForGate" or name == "ThingToOpen" then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	local function IsDoorOpened(door)
+		if not door or not door.Parent then return true end
+		if door:GetAttribute("Opened") == true or door:GetAttribute("Open") == true then
+			return true
+		end
+		return false
+	end
+
+	local function GetRoomDoor(roomNum)
+		local roomsContainer = CurrentRooms or Services.Workspace:FindFirstChild("CurrentRooms")
+		if roomsContainer then
+			local room = roomsContainer:FindFirstChild(tostring(roomNum))
+			if room then
+				local d = room:FindFirstChild("Door")
+				if d and d:IsA("Model") then
+					return d
+				end
+			end
+			local nextRoom = roomsContainer:FindFirstChild(tostring(roomNum + 1))
+			if nextRoom then
+				local d = nextRoom:FindFirstChild("Door")
+				if d and d:IsA("Model") then
+					return d
+				end
+			end
+		end
+		if Objects and Objects.Doors then
+			for _, d in ipairs(Objects.Doors) do
+				if d and d.Parent then
+					local pNum = tonumber(d.Parent.Name)
+					if pNum == roomNum or pNum == roomNum + 1 then
+						return d
+					end
+				end
+			end
+		end
+		if getNextClosedDoor then
+			return getNextClosedDoor()
+		end
+		return nil
+	end
+
+	local function ProcessGateRoom(roomNum)
+		if skippedGateRooms[roomNum] then return end
+		if isSkippingGate then return end
+		if not Toggles.SkipGateRooms or not Toggles.SkipGateRooms.Value then return end
+		if not IsHotelFloor() then return end
+
+		local curNum = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+		if curNum then
+			if curNum > maxRoomReached then
+				maxRoomReached = curNum
+			end
+			-- Если игрок уже прошел дальше этой комнаты, не скипаем повторно
+			if curNum > roomNum or roomNum < maxRoomReached then
+				skippedGateRooms[roomNum] = true
+				return
+			end
+		end
+
+		local roomsContainer = CurrentRooms or Services.Workspace:FindFirstChild("CurrentRooms")
+		if not roomsContainer then return end
+
+		local room = roomsContainer:FindFirstChild(tostring(roomNum))
+		if not room or not IsGateRoom(room) then return end
+
+		isSkippingGate = true
+		if skipGateTask then
+			task.cancel(skipGateTask)
+			skipGateTask = nil
+		end
+
+		skipGateTask = task.spawn(function()
+			local startTime = tick()
+			local openStartTime = nil
+
+			while Toggles.SkipGateRooms.Value and IsHotelFloor() and (tick() - startTime < 35) do
+				local cur = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+				if cur then
+					if cur > maxRoomReached then
+						maxRoomReached = cur
+					end
+					if cur > roomNum then
+						skippedGateRooms[roomNum] = true
+						break
+					end
+				end
+
+				local door = GetRoomDoor(roomNum)
+				if not door or not door.Parent then
+					door = getNextClosedDoor and getNextClosedDoor() or nil
+				end
+
+				if not door or not door.Parent then
+					break
+				end
+
+				local char = Character or (LocalPlayer and LocalPlayer.Character)
+				if char then
+					local pivot = door:GetPivot()
+					char:PivotTo(pivot * CFrame.new(0, -1, 0))
+					pcall(function() door.ClientOpen:Fire() end)
+					pcall(function() door.ClientOpen:FireServer() end)
+				end
+
+				-- Если дверь открыта (например, заранее выбита Рашем или открылась игроком)
+				if IsDoorOpened(door) then
+					if not openStartTime then
+						openStartTime = tick()
+					end
+					-- Даем 0.8 секунды для перехода в следующую комнату
+					if tick() - openStartTime >= 0.8 then
+						skippedGateRooms[roomNum] = true
+						break
+					end
+				end
+
+				task.wait(0.15)
+			end
+			skippedGateRooms[roomNum] = true
+			isSkippingGate = false
+			skipGateTask = nil
+		end)
+	end
+
+	Toggles.SkipGateRooms:OnChanged(function(Value)
+		if not Value then
+			isSkippingGate = false
+			if skipGateTask then
+				task.cancel(skipGateTask)
+				skipGateTask = nil
+			end
+			return
+		end
+
+		table.clear(skippedGateRooms)
+		maxRoomReached = 0
+		if not IsHotelFloor() then return end
+
+		local curNum = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+		if curNum then
+			maxRoomReached = curNum
+			ProcessGateRoom(curNum)
+		end
+	end)
+
+	if Connections.SkipGateRooms then
+		Connections.SkipGateRooms:Disconnect()
+		Connections.SkipGateRooms = nil
+	end
+
+	Connections.SkipGateRooms = LocalPlayer:GetAttributeChangedSignal("CurrentRoom"):Connect(function()
+		if Toggles.SkipGateRooms and Toggles.SkipGateRooms.Value and IsHotelFloor() then
+			local curNum = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+			if curNum then
+				if curNum < maxRoomReached - 3 and curNum <= 1 then
+					-- Сброс при рестарте забега
+					maxRoomReached = curNum
+					table.clear(skippedGateRooms)
+				elseif curNum > maxRoomReached then
+					maxRoomReached = curNum
+				end
+
+				if not skippedGateRooms[curNum] and curNum >= maxRoomReached then
+					ProcessGateRoom(curNum)
+				end
+			end
+		end
+	end)
+
+	-- Периодическая проверка на случай поздней догрузки ассетов комнаты (только на этаже Hotel)
+	task.spawn(function()
+		while true do
+			task.wait(1.0)
+			if Toggles.SkipGateRooms and Toggles.SkipGateRooms.Value and IsHotelFloor() and not isSkippingGate then
+				local curNum = tonumber(LocalPlayer:GetAttribute("CurrentRoom"))
+				if curNum then
+					if curNum < maxRoomReached - 3 and curNum <= 1 then
+						maxRoomReached = curNum
+						table.clear(skippedGateRooms)
+					elseif curNum > maxRoomReached then
+						maxRoomReached = curNum
+					end
+
+					if not skippedGateRooms[curNum] and curNum >= maxRoomReached then
+						ProcessGateRoom(curNum)
+					end
+				end
+			end
+		end
+	end)
+end
 
 Toggles.BypassGiggle:OnChanged(function(Value)
 	for _, Object in Objects.Entities do
@@ -3991,6 +4273,58 @@ Groupboxes.Stairwell_Misc:AddToggle("FlingCreak", {
 	Default = false,
 	ToolTip = "DONT TOUCH THE CARTS URSELF, U WILL DIE"
 })
+Groupboxes.Stairwell_Misc:AddToggle("CrazyCartCreak", {
+	Text = "Crazy Cart Creak",
+	Default = false,
+	Tooltip = "Rapidly thrashes and violently spins shopping carts in all directions inside Creak."
+})
+Groupboxes.Stairwell_Misc:AddSlider("CrazyCartSpeed", {
+	Text = "Crazy Cart Speed",
+	Default = 35,
+	Min = 10,
+	Max = 100,
+	Rounding = 0,
+	Compact = false,
+	Tooltip = "Speed of thrashing and spinning."
+})
+Groupboxes.Stairwell_Misc:AddSlider("CrazyCartRadius", {
+	Text = "Crazy Cart Radius",
+	Default = 4,
+	Min = 1,
+	Max = 15,
+	Rounding = 1,
+	Compact = false,
+	Tooltip = "Displacement distance inside Creak."
+})
+Groupboxes.Stairwell_Misc:AddSlider("CrazyCartForce", {
+	Text = "Crazy Cart Velocity",
+	Default = 220,
+	Min = 50,
+	Max = 1000,
+	Rounding = 0,
+	Compact = false,
+	Tooltip = "Physics linear velocity applied to cart parts."
+})
+Groupboxes.Stairwell_Misc:AddSlider("CrazyCartCount", {
+	Text = "Crazy Cart Count",
+	Default = 1,
+	Min = 1,
+	Max = 5,
+	Rounding = 0,
+	Compact = false,
+	Tooltip = "Number of shopping carts that will spin and attack Creak (1 - 5)."
+})
+Groupboxes.Stairwell_Misc:AddDropdown("CrazyCartPattern", {
+	Text = "Crazy Cart Pattern",
+	Values = { "Chaotic Thrash", "Blender Vortex", "Piston Ram" },
+	Default = "Chaotic Thrash",
+	Tooltip = "Choose the movement and attack pattern of the carts inside Creak."
+})
+Groupboxes.Stairwell_Misc:AddToggle("CrazyCartAntiFling", {
+	Text = "Crazy Cart Anti-Self Fling",
+	Default = true,
+	Tooltip = "Prevents spinning carts from colliding with or flinging your character."
+})
 Groupboxes.Stairwell_Misc:AddToggle("CreakAggressionMeter", {
     Text = "Creak Aggression Meter",
     Default = false,
@@ -4177,64 +4511,554 @@ Toggles.CreakAggressionMeter:OnChanged(function(CreakToggleEnabled)
     end
 end)
 
-Toggles.KillAllWithCart:OnChanged(function(KillAllWithCartState)
-	if not KillAllWithCartState then return end
+do
+	local function IsNoiseTv(instance)
+		if not instance then return false end
+		local name = instance.Name
+		if name == "TV_Stand" or name == "Noise_TV" or name == "NoiseTV" or name == "TV" or name == "Noise" or name == "NoiseModel" then
+			return true
+		end
+		if instance:FindFirstChild("NoiseTV") or instance:FindFirstChild("TV_Stand") or instance:FindFirstChild("Noise_TV") then
+			return true
+		end
+		if instance:FindFirstAncestor("TV_Stand") or instance:FindFirstAncestor("Noise_TV") or instance:FindFirstAncestor("NoiseTV") then
+			return true
+		end
+		return false
+	end
 
-	local KillAllWithCartIndex = 1
+	Functions.IsNoiseTv = IsNoiseTv
 
-	task.spawn(function()
-		while Toggles.KillAllWithCart.Value do
-			local KillAllWithCartCarts = {}
-			for _, KillAllWithCartModel in ipairs(workspace.Misc:GetChildren()) do
-				if KillAllWithCartModel.Name == "ShoppingCart" and KillAllWithCartModel:IsA("Model") then
-					KillAllWithCartCarts[#KillAllWithCartCarts + 1] = KillAllWithCartModel
+	Functions.SafeFireEvent = function(eventObj, ...)
+		if not eventObj then return end
+		if eventObj:IsA("RemoteEvent") then
+			pcall(function(...) eventObj:FireServer(...) end, ...)
+		elseif eventObj:IsA("BindableEvent") then
+			pcall(function(...) eventObj:Fire(...) end, ...)
+		end
+	end
+
+	Functions.GetShoppingCarts = function()
+		local carts = {}
+		local seen = {}
+
+		local function add(model)
+			if model and model:IsA("Model") and not seen[model] then
+				if IsNoiseTv(model) then return end
+				if model.Name == "ShoppingCart" or (model:FindFirstChild("CartAttached") and model:FindFirstChild("Handles")) then
+					seen[model] = true
+					table.insert(carts, model)
 				end
 			end
+		end
 
-			local KillAllWithCartAlivePlayers = {}
-			for _, KillAllWithCartPlayer in ipairs(game.Players:GetPlayers()) do
-				if KillAllWithCartPlayer ~= game.Players.LocalPlayer and KillAllWithCartPlayer.Character then
-					local KillAllWithCartHumanoid = KillAllWithCartPlayer.Character:FindFirstChildOfClass("Humanoid")
-					if KillAllWithCartHumanoid and KillAllWithCartHumanoid.Health > 0 then
-						KillAllWithCartAlivePlayers[#KillAllWithCartAlivePlayers + 1] = KillAllWithCartPlayer
+		if Objects and Objects.Misc then
+			for _, obj in ipairs(Objects.Misc) do
+				if obj and obj.Parent and not IsNoiseTv(obj) and (obj.Name == "ShoppingCart" or obj:FindFirstChild("CartAttached")) then
+					add(obj)
+				end
+			end
+		end
+
+		local misc = workspace:FindFirstChild("Misc")
+		if misc then
+			for _, child in ipairs(misc:GetChildren()) do
+				if not IsNoiseTv(child) and (child.Name == "ShoppingCart" or child:FindFirstChild("CartAttached")) then
+					add(child)
+				end
+			end
+		end
+
+		local currentRooms = workspace:FindFirstChild("CurrentRooms")
+		if currentRooms then
+			for _, room in ipairs(currentRooms:GetChildren()) do
+				for _, child in ipairs(room:GetChildren()) do
+					if not IsNoiseTv(child) and (child.Name == "ShoppingCart" or child:FindFirstChild("CartAttached")) then
+						add(child)
+					elseif child.Name == "Assets" or child.Name == "Misc" then
+						for _, asset in ipairs(child:GetChildren()) do
+							if not IsNoiseTv(asset) and (asset.Name == "ShoppingCart" or asset:FindFirstChild("CartAttached")) then
+								add(asset)
+							end
+						end
 					end
 				end
 			end
-
-			if #KillAllWithCartCarts > 0 and #KillAllWithCartAlivePlayers > 0 then
-				if KillAllWithCartIndex > #KillAllWithCartAlivePlayers then
-					KillAllWithCartIndex = 1
-				end
-				local KillAllWithCartTarget = KillAllWithCartAlivePlayers[KillAllWithCartIndex]
-				local KillAllWithCartTargetCFrame = KillAllWithCartTarget.Character:GetPivot()
-				for KillAllWithCartCartIndex = 1, #KillAllWithCartCarts do
-					KillAllWithCartCarts[KillAllWithCartCartIndex]:PivotTo(KillAllWithCartTargetCFrame)
-				end
-				KillAllWithCartIndex = KillAllWithCartIndex + 1
-			end
-			task.wait(0.10)
 		end
-	end)
-end)
 
-Toggles.FlingCreak:OnChanged(function(FlingCreakState)
-	if not FlingCreakState then return end
+		for _, child in ipairs(workspace:GetChildren()) do
+			if not IsNoiseTv(child) and (child.Name == "ShoppingCart" or child:FindFirstChild("CartAttached")) then
+				add(child)
+			end
+		end
 
-	task.spawn(function()
-		while Toggles.FlingCreak.Value do
-			local creak = workspace:FindFirstChild("LiveEntities") and workspace.LiveEntities:FindFirstChild("Creak")
-			if creak then
-				local targetCFrame = creak:GetPivot()
-				for _, model in ipairs(workspace.Misc:GetChildren()) do
-					if model.Name == "ShoppingCart" and model:IsA("Model") then
-						model:PivotTo(targetCFrame)
+		return carts
+	end
+
+	Functions.GetCreakMonster = function()
+		local creak = workspace:FindFirstChild("LiveEntities") and workspace.LiveEntities:FindFirstChild("Creak")
+		if creak and creak.Parent and creak:IsDescendantOf(workspace) then return creak end
+
+		if Objects and Objects.Entities then
+			for _, entity in ipairs(Objects.Entities) do
+				if entity and entity.Parent and entity.Name == "Creak" and entity:IsDescendantOf(workspace) then
+					return entity
+				end
+			end
+		end
+
+		local wsCreak = workspace:FindFirstChild("Creak")
+		if wsCreak and wsCreak:IsA("Model") and wsCreak.Parent then
+			return wsCreak
+		end
+
+		return nil
+	end
+
+	Functions.DetachTvFromCart = function(cart)
+		if not cart or not cart.Parent then return end
+
+		for _, desc in ipairs(cart:GetDescendants()) do
+			if desc:IsA("JointInstance") or desc:IsA("WeldConstraint") then
+				local p0 = desc.Part0
+				local p1 = desc.Part1
+				if (p0 and IsNoiseTv(p0)) or (p1 and IsNoiseTv(p1)) then
+					pcall(function() desc:Destroy() end)
+				end
+			end
+		end
+
+		for _, child in ipairs(cart:GetChildren()) do
+			if IsNoiseTv(child) then
+				pcall(function() child.Parent = workspace:FindFirstChild("Misc") or workspace end)
+			elseif child.Name == "StoredItems" or child.Name == "ItemHolders" then
+				for _, item in ipairs(child:GetChildren()) do
+					if IsNoiseTv(item) then
+						pcall(function() item.Parent = workspace:FindFirstChild("Misc") or workspace end)
 					end
 				end
 			end
-			task.wait(0.10)
 		end
+	end
+
+	Functions.AttachCart = function(cart, target)
+		if not cart or not cart.Parent or IsNoiseTv(cart) then return end
+
+		Functions.DetachTvFromCart(cart)
+
+		local attachedEvent = cart:FindFirstChild("CartAttached")
+		if attachedEvent then
+			if target then
+				Functions.SafeFireEvent(attachedEvent, target)
+			end
+			Functions.SafeFireEvent(attachedEvent, LocalPlayer.Character)
+			Functions.SafeFireEvent(attachedEvent)
+		end
+
+		local prompt = cart:FindFirstChild("CartPrompt", true)
+		if prompt and not IsNoiseTv(prompt) then
+			if Functions and Functions.FirePrompt then
+				pcall(function() Functions.FirePrompt(prompt) end)
+			elseif fireproximityprompt then
+				pcall(function() fireproximityprompt(prompt) end)
+			end
+		end
+	end
+
+	Functions.ReleaseCart = function(cart)
+		if not cart or not cart.Parent or IsNoiseTv(cart) then return end
+
+		local releasedEvent = cart:FindFirstChild("CartReleased")
+		if releasedEvent then
+			Functions.SafeFireEvent(releasedEvent, LocalPlayer.Character)
+			Functions.SafeFireEvent(releasedEvent)
+		end
+	end
+
+	local cartCustomPhysicalProperties = PhysicalProperties.new(100, 0.5, 0.5, 100, 100)
+
+	Functions.PrepareCartParts = function(cart)
+		if not cart or not cart.Parent or IsNoiseTv(cart) then return end
+
+		Functions.DetachTvFromCart(cart)
+
+		if not cart.PrimaryPart then
+			cart.PrimaryPart = cart:FindFirstChild("Base") or cart:FindFirstChild("Collider") or cart:FindFirstChildWhichIsA("BasePart")
+		end
+
+		for _, part in ipairs(cart:GetDescendants()) do
+			if part:IsA("BasePart") and not IsNoiseTv(part) then
+				if part.Name == "Collider" or part.Name == "Base" or part.Name:find("Collider") then
+					part.CanCollide = true
+					pcall(function()
+						part.CustomPhysicalProperties = cartCustomPhysicalProperties
+					end)
+				end
+				part.Massless = false
+			end
+		end
+	end
+
+	local antiFlingConstraints = {}
+	local function SetCartAntiFling(cart, enable)
+		if not cart or not cart.Parent then return end
+		local char = LocalPlayer and LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+
+		local prim = cart.PrimaryPart or cart:FindFirstChild("Collider") or cart:FindFirstChild("Base")
+		if not prim or not prim:IsA("BasePart") then return end
+
+		if enable then
+			if not antiFlingConstraints[cart] or not antiFlingConstraints[cart].Parent then
+				pcall(function()
+					local ncc = Instance.new("NoCollisionConstraint")
+					ncc.Name = "CrazyCartAntiFling"
+					ncc.Part0 = hrp
+					ncc.Part1 = prim
+					ncc.Parent = prim
+					antiFlingConstraints[cart] = ncc
+				end)
+			end
+		else
+			if antiFlingConstraints[cart] then
+				pcall(function() antiFlingConstraints[cart]:Destroy() end)
+				antiFlingConstraints[cart] = nil
+			end
+		end
+	end
+
+	Toggles.KillAllWithCart:OnChanged(function(KillAllWithCartState)
+		if not KillAllWithCartState then return end
+
+		local KillAllWithCartIndex = 1
+
+		task.spawn(function()
+			while Toggles.KillAllWithCart.Value do
+				local KillAllWithCartCarts = Functions.GetShoppingCarts()
+				local KillAllWithCartAlivePlayers = {}
+				for _, KillAllWithCartPlayer in ipairs(game.Players:GetPlayers()) do
+					if KillAllWithCartPlayer ~= game.Players.LocalPlayer and KillAllWithCartPlayer.Character then
+						local KillAllWithCartHumanoid = KillAllWithCartPlayer.Character:FindFirstChildOfClass("Humanoid")
+						if KillAllWithCartHumanoid and KillAllWithCartHumanoid.Health > 0 then
+							KillAllWithCartAlivePlayers[#KillAllWithCartAlivePlayers + 1] = KillAllWithCartPlayer
+						end
+					end
+				end
+
+				if #KillAllWithCartCarts > 0 and #KillAllWithCartAlivePlayers > 0 then
+					if KillAllWithCartIndex > #KillAllWithCartAlivePlayers then
+						KillAllWithCartIndex = 1
+					end
+					local KillAllWithCartTarget = KillAllWithCartAlivePlayers[KillAllWithCartIndex]
+					local KillAllWithCartTargetCFrame = KillAllWithCartTarget.Character:GetPivot()
+					for KillAllWithCartCartIndex = 1, #KillAllWithCartCarts do
+						local cart = KillAllWithCartCarts[KillAllWithCartCartIndex]
+						Functions.PrepareCartParts(cart)
+						Functions.AttachCart(cart, KillAllWithCartTarget.Character)
+						cart:PivotTo(KillAllWithCartTargetCFrame)
+					end
+					KillAllWithCartIndex = KillAllWithCartIndex + 1
+				end
+				task.wait(0.10)
+			end
+		end)
 	end)
-end)
+
+	Toggles.FlingCreak:OnChanged(function(FlingCreakState)
+		if not FlingCreakState then return end
+
+		task.spawn(function()
+			while Toggles.FlingCreak.Value do
+				local creak = Functions.GetCreakMonster()
+				if creak then
+					local targetCFrame = creak:GetPivot()
+					local carts = Functions.GetShoppingCarts()
+					for _, cart in ipairs(carts) do
+						Functions.PrepareCartParts(cart)
+						Functions.AttachCart(cart, creak)
+						cart:PivotTo(targetCFrame)
+					end
+				end
+				task.wait(0.10)
+			end
+		end)
+	end)
+
+	-- Высокопроизводительный кэш для CrazyCartCreak (0% просадки FPS)
+	local activeCartEntries = {}
+	local cachedCreak = nil
+	local cachedTargetPart = nil
+	local lastScanTime = 0
+	local lastReattachTime = 0
+
+	local function StopAllActiveCarts()
+		for _, entry in ipairs(activeCartEntries) do
+			local cart = entry.Cart
+			if cart and cart.Parent then
+				SetCartAntiFling(cart, false)
+				Functions.ReleaseCart(cart)
+				for _, bp in ipairs(entry.BaseParts) do
+					if bp and bp.Parent then
+						pcall(function()
+							bp.AssemblyLinearVelocity = Vector3.zero
+							bp.AssemblyAngularVelocity = Vector3.zero
+						end)
+					end
+				end
+			end
+		end
+		table.clear(activeCartEntries)
+		cachedCreak = nil
+		cachedTargetPart = nil
+	end
+
+	local function BuildCartEntry(cart)
+		Functions.PrepareCartParts(cart)
+		local parts = {}
+		for _, bp in ipairs(cart:GetDescendants()) do
+			if bp:IsA("BasePart") and not IsNoiseTv(bp) then
+				table.insert(parts, bp)
+			end
+		end
+		return {
+			Cart = cart,
+			BaseParts = parts,
+			PrimaryPart = cart.PrimaryPart or cart:FindFirstChild("Base") or cart:FindFirstChild("Collider")
+		}
+	end
+
+	local function RefreshCrazyCarts(forceScan)
+		local now = tick()
+		if not forceScan and (now - lastScanTime < 1.5) then return end
+		lastScanTime = now
+
+		-- 1. Валидация монстра Creak
+		if not cachedCreak or not cachedCreak.Parent or not cachedCreak:IsDescendantOf(workspace) then
+			cachedCreak = Functions.GetCreakMonster()
+			cachedTargetPart = cachedCreak and (cachedCreak:FindFirstChild("HumanoidRootPart") or cachedCreak.PrimaryPart or cachedCreak:FindFirstChildWhichIsA("BasePart")) or nil
+		end
+		if not cachedCreak then return end
+
+		local creakPivot = cachedTargetPart and cachedTargetPart.CFrame or cachedCreak:GetPivot()
+
+		-- 2. Получение и сортировка тележек
+		local allCarts = Functions.GetShoppingCarts()
+		if #allCarts == 0 then return end
+
+		table.sort(allCarts, function(a, b)
+			local posA = a:GetPivot().Position
+			local posB = b:GetPivot().Position
+			return (posA - creakPivot.Position).Magnitude < (posB - creakPivot.Position).Magnitude
+		end)
+
+		local maxCarts = (Options.CrazyCartCount and Options.CrazyCartCount.Value) or 1
+		maxCarts = math.clamp(maxCarts, 1, 5)
+
+		-- 3. Освобождение неиспользуемых тележек
+		local activeSet = {}
+		local newEntries = {}
+		for i = 1, math.min(#allCarts, maxCarts) do
+			local cart = allCarts[i]
+			activeSet[cart] = true
+			local existing = nil
+			for _, e in ipairs(activeCartEntries) do
+				if e.Cart == cart then
+					existing = e
+					break
+				end
+			end
+			if existing then
+				table.insert(newEntries, existing)
+			else
+				local entry = BuildCartEntry(cart)
+				Functions.AttachCart(cart, cachedCreak)
+				table.insert(newEntries, entry)
+			end
+		end
+
+		-- Очистка старых, которые больше не активны
+		for _, oldEntry in ipairs(activeCartEntries) do
+			if not activeSet[oldEntry.Cart] and oldEntry.Cart and oldEntry.Cart.Parent then
+				SetCartAntiFling(oldEntry.Cart, false)
+				Functions.ReleaseCart(oldEntry.Cart)
+				for _, bp in ipairs(oldEntry.BaseParts) do
+					if bp and bp.Parent then
+						pcall(function()
+							bp.AssemblyLinearVelocity = Vector3.zero
+							bp.AssemblyAngularVelocity = Vector3.zero
+						end)
+					end
+				end
+			end
+		end
+
+		activeCartEntries = newEntries
+
+		-- Обновление анти-флинга
+		local antiFling = (Toggles.CrazyCartAntiFling and Toggles.CrazyCartAntiFling.Value) or false
+		for _, entry in ipairs(activeCartEntries) do
+			SetCartAntiFling(entry.Cart, antiFling)
+		end
+	end
+
+	Toggles.CrazyCartCreak:OnChanged(function(Value)
+		if Connections.CrazyCartCreak then
+			Connections.CrazyCartCreak:Disconnect()
+			Connections.CrazyCartCreak = nil
+		end
+
+		if not Value then
+			pcall(StopAllActiveCarts)
+			return
+		end
+
+		-- Первоначальная инициализация
+		RefreshCrazyCarts(true)
+
+		if #activeCartEntries == 0 then
+			Functions.Notify({ Title = "Crazy Cart Creak", Body = "No Shopping Carts found nearby." })
+		end
+		if not cachedCreak then
+			Functions.Notify({ Title = "Crazy Cart Creak", Body = "Creak is not currently spawned." })
+		end
+
+		lastReattachTime = tick()
+
+		-- Ультра-легкий Heartbeat цикл (только CFrame расчет и применение готовой скорости)
+		Connections.CrazyCartCreak = Services.RunService.Heartbeat:Connect(function()
+			if not Toggles.CrazyCartCreak.Value then
+				if Connections.CrazyCartCreak then
+					Connections.CrazyCartCreak:Disconnect()
+					Connections.CrazyCartCreak = nil
+				end
+				return
+			end
+
+			local t = tick()
+
+			-- Фоновое обновление тележек раз в 1.5 секунды
+			if t - lastScanTime >= 1.5 then
+				RefreshCrazyCarts(false)
+			end
+
+			if not cachedCreak or not cachedCreak.Parent or not cachedCreak:IsDescendantOf(workspace) then
+				return
+			end
+
+			local numCarts = #activeCartEntries
+			if numCarts == 0 then return end
+
+			local creakPivot = cachedTargetPart and cachedTargetPart.CFrame or cachedCreak:GetPivot()
+			local speed = (Options.CrazyCartSpeed and Options.CrazyCartSpeed.Value) or 35
+			local radius = (Options.CrazyCartRadius and Options.CrazyCartRadius.Value) or 4.0
+			local force = (Options.CrazyCartForce and Options.CrazyCartForce.Value) or 220
+			local pattern = (Options.CrazyCartPattern and Options.CrazyCartPattern.Value) or "Chaotic Thrash"
+
+			-- Периодический пинг закрепления (каждые 1.5с)
+			local shouldReattach = (t - lastReattachTime >= 1.5)
+			if shouldReattach then
+				lastReattachTime = t
+				for _, entry in ipairs(activeCartEntries) do
+					Functions.AttachCart(entry.Cart, cachedCreak)
+				end
+			end
+
+			for index, entry in ipairs(activeCartEntries) do
+				local cart = entry.Cart
+				if not cart or not cart.Parent then continue end
+
+				local cartPhase = ((index - 1) / numCarts) * math.pi * 2
+				local offsetX, offsetY, offsetZ
+				local rotX, rotY, rotZ, flip
+
+				if pattern == "Blender Vortex" then
+					local angle = t * speed * 2.8 + cartPhase
+					local currentRadius = radius * (0.6 + 0.4 * math.sin(t * speed * 1.5 + cartPhase))
+					offsetX = math.cos(angle) * currentRadius
+					offsetY = math.sin(t * speed * 3.2 + cartPhase) * (radius * 0.9)
+					offsetZ = math.sin(angle) * currentRadius
+
+					rotX = math.rad((t * speed * 120 + cartPhase * 60) % 360)
+					rotY = -angle + math.pi / 2
+					rotZ = math.rad((math.sin(t * speed * 2) * 45))
+					flip = 0
+				elseif pattern == "Piston Ram" then
+					local ramDir = (index % 2 == 0) and 1 or -1
+					local ramCycle = math.sin(t * speed * 2.5 + cartPhase)
+					local punch = math.sign(ramCycle) * (math.abs(ramCycle) ^ 0.5) * radius * 1.2
+					offsetX = punch * ramDir
+					offsetY = math.sin(t * speed * 1.2 + cartPhase) * 1.5
+					offsetZ = math.cos(t * speed * 1.8 + cartPhase) * (radius * 0.3)
+
+					rotX = math.rad((t * speed * 80) % 360)
+					rotY = math.rad((ramDir > 0 and 0 or 180) + (t * speed * 40) % 360)
+					rotZ = math.rad((t * speed * 90) % 360)
+					flip = (ramCycle > 0 and 0 or math.pi)
+				else
+					local phaseX = t * speed * 2.3 + cartPhase
+					local sharpSinX = math.clamp(math.sin(phaseX) * 2.5, -1, 1) * radius
+					local joltX = (math.sin(phaseX * 3.7) > 0 and 0.5 or -0.5) * radius * 0.4
+					offsetX = sharpSinX + joltX
+
+					local phaseY = t * speed * 3.1 + cartPhase * 1.5
+					local sharpCosY = math.clamp(math.cos(phaseY) * 2.5, -1, 1) * (radius * 0.8)
+					local joltY = (math.cos(phaseY * 4.3) > 0 and 0.5 or -0.5) * radius * 0.4
+					offsetY = sharpCosY + joltY
+
+					local phaseZ = t * speed * 2.7 + cartPhase * 2.0
+					local sharpSinZ = math.clamp(math.sin(phaseZ) * 2.5, -1, 1) * radius
+					local joltZ = (math.sin(phaseZ * 3.1) > 0 and 0.5 or -0.5) * radius * 0.4
+					offsetZ = sharpSinZ + joltZ
+
+					rotX = math.rad((t * speed * 90 + cartPhase * 60) % 360)
+					rotY = math.rad((t * speed * 130 + cartPhase * 90) % 360)
+					rotZ = math.rad((t * speed * 105 + cartPhase * 45) % 360)
+					flip = (math.sin(t * speed * 1.8 + cartPhase) > 0 and 0 or math.pi)
+				end
+
+				local transform = CFrame.new(offsetX, offsetY, offsetZ) * CFrame.Angles(rotX + flip, rotY, rotZ + flip)
+				cart:PivotTo(creakPivot * transform)
+
+				-- Скорости применяются ТОЛЬКО к предварительно кэшированным деталям (0 вызовов GetDescendants)
+				local vel = Vector3.new(
+					(math.random(-100, 100) / 100) * force,
+					(math.random(-100, 100) / 100) * force,
+					(math.random(-100, 100) / 100) * force
+				)
+				local angVel = Vector3.new(
+					(math.random(-100, 100) / 100) * (force * 0.6),
+					(math.random(-100, 100) / 100) * (force * 0.6),
+					(math.random(-100, 100) / 100) * (force * 0.6)
+				)
+				for _, bp in ipairs(entry.BaseParts) do
+					if bp.Parent then
+						bp.AssemblyLinearVelocity = vel
+						bp.AssemblyAngularVelocity = angVel
+					end
+				end
+			end
+		end)
+	end)
+
+	if Options.CrazyCartCount then
+		Options.CrazyCartCount:OnChanged(function()
+			if Toggles.CrazyCartCreak.Value then
+				RefreshCrazyCarts(true)
+			end
+		end)
+	end
+
+	if Toggles.CrazyCartAntiFling then
+		Toggles.CrazyCartAntiFling:OnChanged(function(v)
+			if Toggles.CrazyCartCreak.Value then
+				for _, entry in ipairs(activeCartEntries) do
+					SetCartAntiFling(entry.Cart, v)
+				end
+			end
+		end)
+	end
+end
 
 
 
@@ -4378,6 +5202,7 @@ end)
 
 
 
+do
 local StairwellLandingToken = 0
 
 local function StairwellSnapshotTools()
@@ -4657,6 +5482,7 @@ Toggles.StairwellLandingSpam:OnChanged(function(Value)
 		end
 	end)
 end)
+end
 
 
 Groupboxes.Stairwell_Misc:AddDivider()
@@ -4669,24 +5495,95 @@ Groupboxes.Stairwell_Misc:AddButton("TP Shopping Carts To Player", function()
 		local targetPivot = ShoppingCartTargetPlayer.Character:GetPivot()
 		local safeFrontCFrame = targetPivot * CFrame.new(0, 0, -4)
 
-		local miscFolder = workspace:FindFirstChild("Misc")
-		if not miscFolder then return end
+		local carts = Functions.GetShoppingCarts and Functions.GetShoppingCarts() or {}
+		if #carts == 0 then
+			Functions.Notify({ Title = "Shopping Cart", Body = "No Shopping Carts found in workspace!" })
+			return
+		end
 
-		for _, ShoppingCartModel in ipairs(miscFolder:GetChildren()) do
-			if ShoppingCartModel.Name == "ShoppingCart" and ShoppingCartModel:IsA("Model") then
-				pcall(function()
-					for _, bp in ipairs(ShoppingCartModel:GetDescendants()) do
-						if bp:IsA("BasePart") then
-							bp.AssemblyLinearVelocity = Vector3.zero
-							bp.AssemblyAngularVelocity = Vector3.zero
-						end
+		for _, cart in ipairs(carts) do
+			pcall(function()
+				if Functions.PrepareCartParts then
+					Functions.PrepareCartParts(cart)
+				end
+				for _, bp in ipairs(cart:GetDescendants()) do
+					if bp:IsA("BasePart") then
+						bp.AssemblyLinearVelocity = Vector3.zero
+						bp.AssemblyAngularVelocity = Vector3.zero
 					end
-					ShoppingCartModel:PivotTo(safeFrontCFrame)
-				end)
-				task.wait(0.05)
+				end
+				cart:PivotTo(safeFrontCFrame)
+			end)
+			task.wait(0.05)
+		end
+		Functions.Notify({ Title = "Shopping Cart", Body = "Teleported " .. #carts .. " cart(s) to " .. ShoppingCartTargetName })
+	end)
+end)
+
+Groupboxes.Stairwell_Misc:AddButton("Fire Cart Attached", function()
+	task.spawn(function()
+		local carts = Functions.GetShoppingCarts and Functions.GetShoppingCarts() or {}
+		local creak = Functions.GetCreakMonster and Functions.GetCreakMonster() or nil
+		if #carts == 0 then
+			Functions.Notify({ Title = "CartAttached", Body = "No carts found!" })
+			return
+		end
+		for _, cart in ipairs(carts) do
+			if Functions.AttachCart then
+				Functions.AttachCart(cart, creak)
 			end
 		end
+		Functions.Notify({ Title = "CartAttached", Body = "Fired CartAttached on " .. #carts .. " cart(s)!" })
 	end)
+end)
+
+Groupboxes.Stairwell_Misc:AddButton("Fire Cart Released", function()
+	task.spawn(function()
+		local carts = Functions.GetShoppingCarts and Functions.GetShoppingCarts() or {}
+		if #carts == 0 then
+			Functions.Notify({ Title = "CartReleased", Body = "No carts found!" })
+			return
+		end
+		for _, cart in ipairs(carts) do
+			if Functions.ReleaseCart then
+				Functions.ReleaseCart(cart)
+			end
+		end
+		Functions.Notify({ Title = "CartReleased", Body = "Fired CartReleased on " .. #carts .. " cart(s)!" })
+	end)
+end)
+
+Groupboxes.Stairwell_Misc:AddButton("Trigger Cart Prompt", function()
+	task.spawn(function()
+		local carts = Functions.GetShoppingCarts and Functions.GetShoppingCarts() or {}
+		if #carts == 0 then
+			Functions.Notify({ Title = "CartPrompt", Body = "No carts found!" })
+			return
+		end
+		local triggered = 0
+		for _, cart in ipairs(carts) do
+			local prompt = cart:FindFirstChildWhichIsA("ProximityPrompt", true)
+			if prompt then
+				triggered += 1
+				if Functions and Functions.FirePrompt then
+					pcall(function() Functions.FirePrompt(prompt) end)
+				elseif fireproximityprompt then
+					pcall(function() fireproximityprompt(prompt) end)
+				end
+			end
+		end
+		Functions.Notify({ Title = "CartPrompt", Body = "Triggered prompt on " .. triggered .. " cart(s)!" })
+	end)
+end)
+
+Groupboxes.Stairwell_Misc:AddButton("Count / Find Carts", function()
+	local carts = Functions.GetShoppingCarts and Functions.GetShoppingCarts() or {}
+	local msg = "Found " .. #carts .. " cart(s)."
+	for i, c in ipairs(carts) do
+		msg = msg .. " [" .. i .. "]: " .. (c.Parent and c.Parent.Name or "nil")
+	end
+	Functions.Notify({ Title = "Cart Scanner", Body = msg })
+	print("[ShoppingCart Scanner]", msg)
 end)
 
 Groupboxes.Stairwell_Misc:AddDropdown("ShoppingCartTarget", {
@@ -5075,6 +5972,7 @@ Toggles.OrbitDroppedItems:OnChanged(function(OrbitDroppedItemsEnabled)
 end)
 
 
+do
 local bypassNoiseToken = 0
 local bypassNoiseMiscChildAddedConnection = nil
 local bypassNoisePromptTriggeredConnection = nil
@@ -5358,6 +6256,7 @@ Toggles.BypassNoise:OnChanged(function(value)
 		end
 	end)
 end)
+end
 
 Toggles.DroppedItemValue:OnChanged(function(DroppedItemValue)
 	local DroppedItemValueScreenGui = game:GetService("CoreGui"):FindFirstChild("DropsCoinCounter")
@@ -5465,95 +6364,105 @@ Groupboxes.Exploits_BypassRight:AddToggle("InfCrucifix", {
 })
 
 
-local InfCrucifixDropTable = {
-	RushMoving   = 54,
-	AmbushMoving = 67,
-	A60          = 70,
-	GlitchRush   = 120,
-	GlitchAmbush = 155,
-	A120         = 75,
+do
+	local InfCrucifixDropTable = {
+		RushMoving   = 54,
+		AmbushMoving = 67,
+		A60          = 70,
+		GlitchRush   = 120,
+		GlitchAmbush = 155,
+		A120         = 75,
+	}
 
-}
+	local InfCrucifixConnection = nil
 
+	Toggles.InfCrucifix:OnChanged(function(Value)
+		if InfCrucifixConnection then
+			InfCrucifixConnection:Disconnect()
+			InfCrucifixConnection = nil
+		end
 
-
-Toggles.InfCrucifix:OnChanged(function(Value)
-	print("i allive")
-	local InfCrucifixRaycastParams = RaycastParams.new()
-	InfCrucifixRaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-
-	local InfCrucifixConnection
-	InfCrucifixConnection = RunService.RenderStepped:Connect(function()
-		if not Toggles.InfCrucifix.Value then
-			if InfCrucifixConnection then
-				InfCrucifixConnection:Disconnect()
-			end
+		if not Value then
 			return
 		end
 
-		local InfCrucifixCharacter = game.Players.LocalPlayer
-		if not InfCrucifixCharacter then
-			return
-		end
+		local InfCrucifixRaycastParams = RaycastParams.new()
+		InfCrucifixRaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 
-		local InfCrucifixCollision = InfCrucifixCharacter:FindFirstChild("CollisionPart")
-		if not InfCrucifixCollision then
-			return
-		end
-
-		InfCrucifixRaycastParams.FilterDescendantsInstances = {InfCrucifixCharacter}
-
-		for _, InfCrucifixEntity in ipairs(Workspace:GetChildren()) do
-			local InfCrucifixMaxDistance = InfCrucifixDropTable[InfCrucifixEntity.Name]
-			if not InfCrucifixMaxDistance or not InfCrucifixEntity.PrimaryPart then
-				continue
+		InfCrucifixConnection = RunService.RenderStepped:Connect(function()
+			if not Toggles.InfCrucifix.Value then
+				if InfCrucifixConnection then
+					InfCrucifixConnection:Disconnect()
+					InfCrucifixConnection = nil
+				end
+				return
 			end
 
-			InfCrucifixEntity.PrimaryPart.CanCollide = true
-			InfCrucifixEntity.PrimaryPart.CanQuery = true
-
-			local InfCrucifixOrigin = InfCrucifixCollision.Position
-			local InfCrucifixDirection = InfCrucifixEntity.PrimaryPart.Position - InfCrucifixOrigin
-			local InfCrucifixRayResult = Workspace:Raycast(InfCrucifixOrigin, InfCrucifixDirection, InfCrucifixRaycastParams)
-
-			if not InfCrucifixRayResult or not InfCrucifixRayResult.Instance:IsDescendantOf(InfCrucifixEntity) then
-				continue
+			local InfCrucifixCharacter = Character or (LocalPlayer and LocalPlayer.Character)
+			if not InfCrucifixCharacter then
+				return
 			end
 
-			local InfCrucifixDistance = (InfCrucifixCollision.Position - InfCrucifixEntity.PrimaryPart.Position).Magnitude
-			if InfCrucifixDistance >= InfCrucifixMaxDistance then
-				continue
+			local InfCrucifixCollision = InfCrucifixCharacter:FindFirstChild("CollisionPart") or InfCrucifixCharacter:FindFirstChild("Collision") or InfCrucifixCharacter:FindFirstChild("HumanoidRootPart")
+			if not InfCrucifixCollision then
+				return
 			end
 
-			local InfCrucifixTool = InfCrucifixCharacter:FindFirstChildOfClass("Tool")
-			if not InfCrucifixTool or InfCrucifixTool.Name ~= "Crucifix" then
-				continue
-			end
+			InfCrucifixRaycastParams.FilterDescendantsInstances = {InfCrucifixCharacter}
 
-			task.spawn(function()
-				ReplicatedStorage.RemotesFolder.DropItem:FireServer(InfCrucifixTool)
-				task.wait(0.54)
-				print("hi")
-				local InfCrucifixDrops = Workspace:FindFirstChild("Drops")
-				if not InfCrucifixDrops then
-					return
+			for _, InfCrucifixEntity in ipairs(Workspace:GetChildren()) do
+				local InfCrucifixMaxDistance = InfCrucifixDropTable[InfCrucifixEntity.Name]
+				if not InfCrucifixMaxDistance or not InfCrucifixEntity.PrimaryPart then
+					continue
 				end
 
-				local InfCrucifixDropped = InfCrucifixDrops:FindFirstChild("Crucifix")
-				if not InfCrucifixDropped then
-					return
+				InfCrucifixEntity.PrimaryPart.CanCollide = true
+				InfCrucifixEntity.PrimaryPart.CanQuery = true
+
+				local InfCrucifixOrigin = InfCrucifixCollision.Position
+				local InfCrucifixDirection = InfCrucifixEntity.PrimaryPart.Position - InfCrucifixOrigin
+				local InfCrucifixRayResult = Workspace:Raycast(InfCrucifixOrigin, InfCrucifixDirection, InfCrucifixRaycastParams)
+
+				if not InfCrucifixRayResult or not InfCrucifixRayResult.Instance:IsDescendantOf(InfCrucifixEntity) then
+					continue
 				end
 
-				local InfCrucifixPrompt = InfCrucifixDropped:FindFirstChildOfClass("ProximityPrompt")
-				if InfCrucifixPrompt then
-					fireproximityprompt(InfCrucifixPrompt)
+				local InfCrucifixDistance = (InfCrucifixCollision.Position - InfCrucifixEntity.PrimaryPart.Position).Magnitude
+				if InfCrucifixDistance >= InfCrucifixMaxDistance then
+					continue
 				end
-			end)
-			print ("hi")
-			task.wait(0.6)
-		end
+
+				local InfCrucifixTool = InfCrucifixCharacter:FindFirstChildOfClass("Tool")
+				if not InfCrucifixTool or InfCrucifixTool.Name ~= "Crucifix" then
+					continue
+				end
+
+				task.spawn(function()
+					local remotes = RemotesFolder or (Services and Services.ReplicatedStorage and Services.ReplicatedStorage:FindFirstChild("RemotesFolder"))
+					if remotes and remotes:FindFirstChild("DropItem") then
+						remotes.DropItem:FireServer(InfCrucifixTool)
+					end
+					task.wait(0.54)
+					local InfCrucifixDrops = Workspace:FindFirstChild("Drops")
+					if not InfCrucifixDrops then
+						return
+					end
+
+					local InfCrucifixDropped = InfCrucifixDrops:FindFirstChild("Crucifix")
+					if not InfCrucifixDropped then
+						return
+					end
+
+					local InfCrucifixPrompt = InfCrucifixDropped:FindFirstChildOfClass("ProximityPrompt")
+					if InfCrucifixPrompt and fireproximityprompt then
+						fireproximityprompt(InfCrucifixPrompt)
+					end
+				end)
+				task.wait(0.6)
+			end
+		end)
 	end)
-end)
+end
 
 
 Groupboxes.Exploits_BypassRight:AddDivider()
@@ -6072,7 +6981,10 @@ Toggles.RemoveSurge:OnChanged(function(Value)
 end)
 
 Groupboxes.Exploits_Audio = Tabs.Exploits:AddLeftGroupbox("Audio")
-Globals.JamMuffle = Services.SoundService:WaitForChild("Main"):FindFirstChild("Jamming") or Instance.new("EqualizerSoundEffect")
+do
+	local soundMain = Services.SoundService:WaitForChild("Main", 2) or Services.SoundService:FindFirstChild("Main")
+	Globals.JamMuffle = (soundMain and soundMain:FindFirstChild("Jamming")) or Instance.new("EqualizerSoundEffect")
+end
 
 Groupboxes.Exploits_Audio:AddToggle("RemoveFootstepSounds",    { Text = "Remove Footstep Sounds",    Default = false, Tooltip = "Removes the sounds when walking." })
 Groupboxes.Exploits_Audio:AddToggle("RemoveJamminMusic",       { Text = "Remove Jammin Music",       Default = false, Tooltip = "Removes the music and muffle effect from the 'Jammin' modifier." })
@@ -6344,6 +7256,7 @@ Groupboxes.Visuals_Entities:AddSlider("ShowEntityPathLineThickness", {
     Rounding = 2
 })
 
+do
 local ShowEntityPathLines = {}
 
 local function ShowEntityPathClearAllLines()
@@ -6512,6 +7425,7 @@ Options.ShowEntityPathLineThickness:OnChanged(function()
         ShowEntityPathUpdateAll()
     end
 end)
+end
 
 
 Groupboxes.Visuals_Entities:AddDivider()
@@ -7713,12 +8627,14 @@ Functions.HandleCharacter = function(NewCharacter)
 	end
 	Globals.MainUI = LocalPlayer.PlayerGui.MainUI
 
-	Collision = NewCharacter:WaitForChild("Collision")
-	CollisionPart  = NewCharacter:FindFirstChild("CollisionPart") or NewCharacter:FindFirstChild("Collision")
-	CollisionClone = Collision:Clone()
-	CollisionClone.Parent = NewCharacter
-	CollisionClone.Name = "CollisionClone"
-	CollisionClone.Massless = true
+	Collision = NewCharacter:WaitForChild("Collision", 5) or NewCharacter:FindFirstChild("Collision") or RootPart
+	CollisionPart  = NewCharacter:FindFirstChild("CollisionPart") or Collision or RootPart
+	if Collision then
+		CollisionClone = Collision:Clone()
+		CollisionClone.Parent = NewCharacter
+		CollisionClone.Name = "CollisionClone"
+		CollisionClone.Massless = true
+	end
 
 	CollisionPartClone = CollisionPart:Clone()
 	CollisionPartClone.Parent = NewCharacter
@@ -7940,22 +8856,30 @@ Functions.HandleCharacter = function(NewCharacter)
 		end
 	end)
 
-	Connections.AnticheatEnableDetector1 = RemotesFolder:WaitForChild("Cutscene").OnClientEvent:Connect(function(CutsceneName)
-		if Globals.AnticheatDisabled and not CutsceneName:find("SewerSeek") then
-			Globals.AnticheatDisabled = false
-			Functions.Notify({ Title = "The anticheat has been re-enabled.", Body = "Interact with a ladder to disable it again." })
+	if RemotesFolder then
+		local cutsceneRemote = RemotesFolder:WaitForChild("Cutscene", 3) or RemotesFolder:FindFirstChild("Cutscene")
+		if cutsceneRemote and cutsceneRemote:IsA("RemoteEvent") then
+			Connections.AnticheatEnableDetector1 = cutsceneRemote.OnClientEvent:Connect(function(CutsceneName)
+				if Globals.AnticheatDisabled and not CutsceneName:find("SewerSeek") then
+					Globals.AnticheatDisabled = false
+					Functions.Notify({ Title = "The anticheat has been re-enabled.", Body = "Interact with a ladder to disable it again." })
+				end
+			end)
 		end
-	end)
 
-	Connections.AnticheatEnableDetector2 = RemotesFolder:WaitForChild("UseEnemyModule").OnClientEvent:Connect(function(ModuleName)
-		if ModuleName == "Void" or ModuleName == "Glitch" then
-			if Globals.AnticheatDisabled then
-				Globals.AnticheatDisabled = false
-				Functions.Notify({ Title = "The anticheat has been re-enabled.", Body = "Interact with a ladder to disable it again." })
-			end
-			LocalPlayer:SetAttribute("CurrentRoom", LatestRoom.Value)
+		local useEnemyRemote = RemotesFolder:WaitForChild("UseEnemyModule", 3) or RemotesFolder:FindFirstChild("UseEnemyModule")
+		if useEnemyRemote and useEnemyRemote:IsA("RemoteEvent") then
+			Connections.AnticheatEnableDetector2 = useEnemyRemote.OnClientEvent:Connect(function(ModuleName)
+				if ModuleName == "Void" or ModuleName == "Glitch" then
+					if Globals.AnticheatDisabled then
+						Globals.AnticheatDisabled = false
+						Functions.Notify({ Title = "The anticheat has been re-enabled.", Body = "Interact with a ladder to disable it again." })
+					end
+					LocalPlayer:SetAttribute("CurrentRoom", LatestRoom.Value)
+				end
+			end)
 		end
-	end)
+	end
 
 	Connections.AnimationHandler = Character.ChildAdded:Connect(function()
 		local ToolNames = { "Lockpick","Shears","SkeletonKey","Key","GeneratorFuse","KeyElectrical","KeyBackdoor","KeyIron", "Multitool" }
@@ -9443,13 +10367,12 @@ Connections.PlayerHandler = Services.Players.PlayerAdded:Connect(function(Player
 	end)
 end)
 
-local PromptsToFire = {}
-local PromptCooldown = {}
-
 Functions.FirePrompt      = Abysall.Environment.fireproximityprompt
 Functions.ForceFirePrompt = Abysall.Environment.fireproximityprompt
 
 if not Functions.FirePrompt then
+	local PromptsToFire = {}
+	local PromptCooldown = {}
 	Functions.FirePrompt = function(Prompt)
 		if not Prompt:IsA("ProximityPrompt") or PromptCooldown[Prompt] or table.find(PromptsToFire, Prompt) or not Camera then return end
 		table.insert(PromptsToFire, Prompt)
@@ -9737,11 +10660,30 @@ Connections.InfiniteItemsHandler = Services.ProximityPromptService.PromptTrigger
 	local AnyTool = Character:FindFirstChildOfClass("Tool")
 	local ToolData = AnyTool and ItemNames[AnyTool.Name]
 	if AnyTool and ToolData and Toggles.InfiniteItemsToggle.Value and Options.InfiniteItemsList.Value[ToolData] then
-		Drops.ChildAdded:Once(function(NewTool)
-			local Prompt = NewTool:FindFirstChild("ModulePrompt")
-			local RealPrompt = FakePrompts[Object]
-			Functions.FirePrompt(Prompt)
+				local RealPrompt = FakePrompts[Object]
+		local Handled = false
+		local DropConn
+		DropConn = Drops.ChildAdded:Connect(function(NewTool)
+			if Handled then return end
+			Handled = true
+			DropConn:Disconnect()
+
+			-- подбор предмета: стреляем сразу и повторяем каждый кадр, пока он не поднят
+			task.spawn(function()
+				local Pickup = NewTool:FindFirstChild("ModulePrompt") or NewTool:WaitForChild("ModulePrompt", 1)
+				if not Pickup then return end
+				for _ = 1, 15 do
+					if NewTool.Parent ~= Drops then break end
+					Functions.FirePrompt(Pickup)
+					task.wait()
+				end
+			end)
+
+			-- настоящий промпт в том же кадре, без ожиданий
 			Functions.FirePrompt(RealPrompt)
+		end)
+		task.delay(3, function()
+			if DropConn then DropConn:Disconnect() end
 		end)
 		Character.ChildAdded:Once(function(NewTool)
 			if NewTool.Name == "Shears" then NewTool:WaitForChild("Handle"):WaitForChild("sound_promptend"):Play() end
@@ -10066,6 +11008,7 @@ end
 
 Connections.EntityHandler = Services.Workspace.ChildAdded:Connect(HandleEntitySpawn)
 
+do
 local liveEntities = Services.Workspace:FindFirstChild("LiveEntities")
 if liveEntities then
 	Connections.LiveEntitiesHandler = liveEntities.ChildAdded:Connect(HandleEntitySpawn)
@@ -10164,6 +11107,7 @@ Connections.PromptFixer = Services.RunService.Heartbeat:Connect(function()
 		end
 	end
 end)
+end
 
 if LocalPlayer.Character then
 	task.spawn(function() Functions.HandleCharacter(LocalPlayer.Character) end)
@@ -10210,6 +11154,10 @@ Library:OnUnload(function()
 	if OrbitDroppedItemsConnection then
 		OrbitDroppedItemsConnection:Disconnect()
 		OrbitDroppedItemsConnection = nil
+	end
+	if Connections.CrazyCartCreak then
+		Connections.CrazyCartCreak:Disconnect()
+		Connections.CrazyCartCreak = nil
 	end
 	droppedItemsIntervalRunning = false
 
@@ -10386,9 +11334,11 @@ end)
 
 
 
-local uiWaitTimeout = tick() + 5
-while not Globals.MainUI and tick() < uiWaitTimeout do
-	task.wait(0.1)
+do
+	local uiWaitTimeout = tick() + 5
+	while not Globals.MainUI and tick() < uiWaitTimeout do
+		task.wait(0.1)
+	end
 end
 
 if not Globals.MainUI and LocalPlayer:FindFirstChild("PlayerGui") then
