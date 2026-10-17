@@ -1,17 +1,9 @@
 return function(Window)
 	local Changelog = {
-		"16/10/2026",
-		"<font color='rgb(0, 255, 0)'>+ Added Auto Position Spoof</font>",
-		"<font color='rgb(0, 255, 0)'>+ Added Method Velocity Manipulation</font>",
-		"<font color='rgb(0, 255, 0)'>+ Added Speed Velocity Manipulation</font>",
-		"<font color='rgb(0, 255, 0)'>+ Added Method Noise Tv Breaker</font>",
-		"<font color='rgb(255, 255, 0)'>~ Changed Max Speed 100 to 75</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Noise Tv Breaker</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Tp to trash and drop</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Disable Timothy Jumpscare</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Remove A-90</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Mobile Crash When use Teleport Items</font>",
-		"<font color='rgb(255, 255, 0)'>~ Fixed Forget Me or Not Skipper</font>",
+		"17/10/2026",
+		"<font color='rgb(0, 255, 0)'>+ Added Skip Gate Room</font>",
+		"<font color='rgb(0, 255, 0)'>+ Added Crazy Cart Creak</font>",
+		"<font color='rgb(255, 255, 0)'>~ Boost Infinite Items</font>",
 	}
 
 	local function cloneref(service)
